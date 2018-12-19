@@ -6,16 +6,27 @@ ffi.cdef[[
     typedef struct rd_kafka_topic_s rd_kafka_topic_t;
     typedef struct rd_kafka_topic_conf_s rd_kafka_topic_conf_t;
 
-    typedef enum rd_kafka_type_t {
-        RD_KAFKA_PRODUCER,
-        RD_KAFKA_CONSUMER
-    } rd_kafka_type_t;
-
     typedef enum {
         RD_KAFKA_RESP_ERR__BEGIN = -200,
         RD_KAFKA_RESP_ERR_NO_ERROR = 0,
         /* ... */
     } rd_kafka_resp_err_t;
+
+    typedef struct rd_kafka_message_s {
+        rd_kafka_resp_err_t err;
+        rd_kafka_topic_t    *rkt;
+        int32_t             partition;
+        void                *payload;
+        size_t              len;
+        void                *key;
+        size_t              key_len;
+        int64_t             offset;
+    } rd_kafka_message_t;
+
+    typedef enum rd_kafka_type_t {
+        RD_KAFKA_PRODUCER,
+        RD_KAFKA_CONSUMER
+    } rd_kafka_type_t;
 
     typedef enum {
         RD_KAFKA_CONF_UNKNOWN = -2, /* Unknown configuration name. */
@@ -30,8 +41,8 @@ ffi.cdef[[
     void rd_kafka_conf_dump_free (const char **arr, size_t cnt);
     rd_kafka_conf_res_t rd_kafka_conf_set (rd_kafka_conf_t *conf, const char *name, const char *value,
             char *errstr, size_t errstr_size);
-    void rd_kafka_conf_set_dr_cb (rd_kafka_conf_t *conf, void (*dr_cb) (rd_kafka_t *rk,
-            void *payload, size_t len, rd_kafka_resp_err_t err, void *opaque, void *msg_opaque));
+    void rd_kafka_conf_set_dr_msg_cb (rd_kafka_conf_t *conf, void (*dr_msg_cb) (rd_kafka_t *rk,
+            const rd_kafka_message_t *rkmessage, void *opaque));
     void rd_kafka_conf_set_error_cb (rd_kafka_conf_t *conf, void  (*error_cb) (rd_kafka_t *rk, int err,
             const char *reason, void *opaque));
     void rd_kafka_conf_set_stats_cb (rd_kafka_conf_t *conf, int (*stats_cb) (rd_kafka_t *rk, char *json,
@@ -65,7 +76,10 @@ ffi.cdef[[
     rd_kafka_resp_err_t rd_kafka_errno2err (int errnox);
     const char *rd_kafka_err2str (rd_kafka_resp_err_t err);
     int rd_kafka_thread_cnt (void);
+
+    rd_kafka_resp_err_t rd_kafka_flush (rd_kafka_t *rk, int timeout_ms);
 ]]
 
 local librdkafka = ffi.load("librdkafka.so.1")
 return librdkafka
+
