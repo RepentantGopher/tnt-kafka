@@ -21,6 +21,7 @@ ffi.cdef[[
         void                *key;
         size_t              key_len;
         int64_t             offset;
+        void                *_private;
     } rd_kafka_message_t;
 
     typedef enum rd_kafka_type_t {

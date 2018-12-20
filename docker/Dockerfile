@@ -6,4 +6,4 @@ ADD . /opt/tarantool
 
 WORKDIR /opt/tarantool
 
-ENTRYPOINT tarantool /opt/tarantool/tests/new_producer.lua
+ENTRYPOINT tarantool /opt/tarantool/tests/producer.lua
