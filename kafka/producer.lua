@@ -187,6 +187,8 @@ function Producer:start()
     self._poll_fiber = fiber.create(function()
         self:_poll()
     end)
+
+    return nil
 end
 
 function Producer:stop(timeout_ms)
@@ -211,6 +213,8 @@ function Producer:stop(timeout_ms)
     librdkafka.rd_kafka_destroy(self._rd_producer)
     librdkafka.rd_kafka_wait_destroyed(timeout_ms)
     self._rd_producer = nil
+
+    return nil
 end
 
 function Producer:_get_topic_rd_config(config)

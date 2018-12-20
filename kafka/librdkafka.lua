@@ -24,6 +24,8 @@ ffi.cdef[[
         void                *_private;
     } rd_kafka_message_t;
 
+    void rd_kafka_message_destroy(rd_kafka_message_t *rkmessage);
+
     typedef enum rd_kafka_type_t {
         RD_KAFKA_PRODUCER,
         RD_KAFKA_CONSUMER
@@ -79,6 +81,40 @@ ffi.cdef[[
     int rd_kafka_thread_cnt (void);
 
     rd_kafka_resp_err_t rd_kafka_flush (rd_kafka_t *rk, int timeout_ms);
+
+    typedef struct rd_kafka_topic_partition_s {
+        char        *topic;             /**< Topic name */
+        int32_t      partition;         /**< Partition */
+	    int64_t      offset;            /**< Offset */
+        void        *metadata;          /**< Metadata */
+        size_t       metadata_size;     /**< Metadata size */
+        void        *opaque;            /**< Application opaque */
+        rd_kafka_resp_err_t err;        /**< Error code, depending on use. */
+        void       *_private;           /**< INTERNAL USE ONLY,
+                                         *   INITIALIZE TO ZERO, DO NOT TOUCH */
+    } rd_kafka_topic_partition_t;
+
+    typedef struct rd_kafka_topic_partition_list_s {
+        int cnt;                           /**< Current number of elements */
+        int size;                          /**< Current allocated size */
+        rd_kafka_topic_partition_t *elems; /**< Element array[] */
+    } rd_kafka_topic_partition_list_t;
+
+    rd_kafka_topic_partition_list_t *rd_kafka_topic_partition_list_new (int size);
+    void rd_kafka_topic_partition_list_destroy (rd_kafka_topic_partition_list_t *rkparlist);
+    rd_kafka_topic_partition_t *rd_kafka_topic_partition_list_add (rd_kafka_topic_partition_list_t *rktparlist, const char *topic, int32_t partition);
+
+    /**
+    * @remark Only the \c .topic field is used in the supplied \p topics list,
+    *         all other fields are ignored.
+    */
+    rd_kafka_resp_err_t rd_kafka_subscribe (rd_kafka_t *rk, const rd_kafka_topic_partition_list_t *topics);
+
+    rd_kafka_message_t *rd_kafka_consumer_poll (rd_kafka_t *rk, int timeout_ms);
+    rd_kafka_resp_err_t rd_kafka_consumer_close (rd_kafka_t *rk);
+
+    rd_kafka_resp_err_t rd_kafka_commit (rd_kafka_t *rk, const rd_kafka_topic_partition_list_t *offsets, int async);
+    rd_kafka_resp_err_t rd_kafka_commit_message (rd_kafka_t *rk, const rd_kafka_message_t *rkmessage, int async);
 ]]
 
 local librdkafka = ffi.load("librdkafka.so.1")
