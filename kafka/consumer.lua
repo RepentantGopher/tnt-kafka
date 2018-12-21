@@ -105,6 +105,25 @@ function Consumer.create(config)
     return consumer
 end
 
+function Consumer:_get_topic_rd_config(config)
+    local rd_config = librdkafka.rd_kafka_topic_conf_new()
+
+    ffi.gc(rd_config, function (rd_config)
+        librdkafka.rd_kafka_topic_conf_destroy(rd_config)
+    end)
+
+    local ERRLEN = 256
+    for key, value in pairs(config) do
+        local errbuf = ffi.new("char[?]", ERRLEN) -- cdata objects are garbage collected
+
+        if librdkafka.rd_kafka_topic_conf_set(rd_config, key, value, errbuf, ERRLEN) ~= librdkafka.RD_KAFKA_CONF_OK then
+            return nil, ffi.string(errbuf)
+        end
+    end
+
+    return rd_config, nil
+end
+
 function Consumer:_get_consumer_rd_config()
     local rd_config = librdkafka.rd_kafka_conf_new()
 
@@ -141,7 +160,6 @@ function Consumer:_get_consumer_rd_config()
 
     librdkafka.rd_kafka_conf_set_consume_cb(rd_config,
         function(rkmessage)
-            print(rkmessage)
             self._output_ch:put(ConsumerMessage.create(rkmessage))
         end)
 
@@ -156,14 +174,20 @@ function Consumer:_get_consumer_rd_config()
             print("log", tonumber(level), ffi.string(fac), ffi.string(buf))
         end)
 
+    local rd_topic_config, err = self:_get_topic_rd_config({["auto.offset.reset"] = "earliest"})
+    if err ~= nil then
+        return nil, err
+    end
+
+    librdkafka.rd_kafka_conf_set_default_topic_conf(rd_config, rd_topic_config)
+
     return rd_config, nil
 end
 
 function Consumer:_poll()
     while true do
-        librdkafka.rd_kafka_poll(self._rd_consumer, 10)
-        local rd_message = librdkafka.rd_kafka_consumer_poll(self._rd_consumer, 1000)
-        print(rd_message)
+        librdkafka.rd_kafka_poll(self._rd_consumer, 1)
+        local rd_message = librdkafka.rd_kafka_consumer_poll(self._rd_consumer, 1)
         if rd_message ~= nil and rd_message.err ~= librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
             -- FIXME: properly log this
             print(ffi.string(librdkafka.rd_kafka_err2str(rd_message.err)))
@@ -238,9 +262,7 @@ function Consumer:subscribe(topics)
 
     local list = librdkafka.rd_kafka_topic_partition_list_new(#topics)
     for _, topic in ipairs(topics) do
-        print(topic, librdkafka.RD_KAFKA_PARTITION_UA)
---        librdkafka.rd_kafka_topic_partition_list_add(list, topic, librdkafka.RD_KAFKA_PARTITION_UA)
-        librdkafka.rd_kafka_topic_partition_list_add(list, topic, 0)
+        librdkafka.rd_kafka_topic_partition_list_add(list, topic, librdkafka.RD_KAFKA_PARTITION_UA)
     end
 
     local err = nil

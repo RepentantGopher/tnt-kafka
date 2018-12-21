@@ -86,6 +86,8 @@ ffi.cdef[[
 
     rd_kafka_resp_err_t rd_kafka_flush (rd_kafka_t *rk, int timeout_ms);
 
+    void rd_kafka_conf_set_default_topic_conf (rd_kafka_conf_t *conf, rd_kafka_topic_conf_t *tconf);
+
     typedef struct rd_kafka_topic_partition_s {
         char        *topic;             /**< Topic name */
         int32_t      partition;         /**< Partition */
