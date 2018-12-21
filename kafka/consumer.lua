@@ -7,11 +7,15 @@ local ConsumerConfig = {}
 
 ConsumerConfig.__index = ConsumerConfig
 
-function ConsumerConfig.create(brokers_list)
+function ConsumerConfig.create(brokers_list, consumer_group, enable_auto_commit)
     assert(brokers_list ~= nil)
+    assert(consumer_group ~= nil)
+    assert(enable_auto_commit ~= nil)
 
     local config = {
         _brokers_list = brokers_list,
+        _consumer_group = consumer_group,
+        _enable_auto_commit = enable_auto_commit,
         _options = {},
     }
     setmetatable(config, ConsumerConfig)
@@ -20,6 +24,14 @@ end
 
 function ConsumerConfig:get_brokers_list()
     return self._brokers_list
+end
+
+function ConsumerConfig:get_consumer_group()
+    return self._consumer_group
+end
+
+function ConsumerConfig:get_enable_auto_commit()
+    return self._enable_auto_commit
 end
 
 function ConsumerConfig:set_option(name, value)
@@ -42,7 +54,7 @@ function ConsumerMessage.create(rd_message)
         _partition = nil,
         _offset = nil,
     }
-    ffi.gc(msg, function(...)
+    ffi.gc(msg._rd_message, function(...)
         librdkafka.rd_kafka_message_destroy(...)
     end)
     setmetatable(msg, ConsumerMessage)
@@ -102,6 +114,24 @@ function Consumer:_get_consumer_rd_config()
 --    end)
 
     local ERRLEN = 256
+    local errbuf = ffi.new("char[?]", ERRLEN) -- cdata objects are garbage collected
+    if librdkafka.rd_kafka_conf_set(rd_config, "group.id", tostring(self.config:get_consumer_group()), errbuf, ERRLEN) ~= librdkafka.RD_KAFKA_CONF_OK then
+        return nil, ffi.string(errbuf)
+    end
+
+    local enable_auto_commit
+    if self.config:get_enable_auto_commit() then
+        enable_auto_commit = "true"
+    else
+        enable_auto_commit = "false"
+    end
+
+    local ERRLEN = 256
+    local errbuf = ffi.new("char[?]", ERRLEN) -- cdata objects are garbage collected
+    if librdkafka.rd_kafka_conf_set(rd_config, "enable.auto.commit", enable_auto_commit, errbuf, ERRLEN) ~= librdkafka.RD_KAFKA_CONF_OK then
+        return nil, ffi.string(errbuf)
+    end
+
     for key, value in pairs(self.config:get_options()) do
         local errbuf = ffi.new("char[?]", ERRLEN) -- cdata objects are garbage collected
         if librdkafka.rd_kafka_conf_set(rd_config, key, tostring(value), errbuf, ERRLEN) ~= librdkafka.RD_KAFKA_CONF_OK then
@@ -109,17 +139,37 @@ function Consumer:_get_consumer_rd_config()
         end
     end
 
+    librdkafka.rd_kafka_conf_set_consume_cb(rd_config,
+        function(rkmessage)
+            print(rkmessage)
+            self._output_ch:put(ConsumerMessage.create(rkmessage))
+        end)
+
+    librdkafka.rd_kafka_conf_set_error_cb(rd_config,
+        function(rk, err, reason)
+            print("error", tonumber(err), ffi.string(reason))
+        end)
+
+
+    librdkafka.rd_kafka_conf_set_log_cb(rd_config,
+        function(rk, level, fac, buf)
+            print("log", tonumber(level), ffi.string(fac), ffi.string(buf))
+        end)
+
     return rd_config, nil
 end
 
 function Consumer:_poll()
     while true do
-        local rd_message = librdkafka.rd_kafka_consumer_poll(self._rd_consumer, 1)
-        if rd_message.err == librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
-            self._output_ch:put(ConsumerMessage.create(rd_message))
-        else
-            fiber.yield()
+        librdkafka.rd_kafka_poll(self._rd_consumer, 10)
+        local rd_message = librdkafka.rd_kafka_consumer_poll(self._rd_consumer, 1000)
+        print(rd_message)
+        if rd_message ~= nil and rd_message.err ~= librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
+            -- FIXME: properly log this
+            print(ffi.string(librdkafka.rd_kafka_err2str(rd_message.err)))
         end
+
+        fiber.yield()
     end
 end
 
@@ -134,13 +184,20 @@ function Consumer:start()
     local ERRLEN = 256
     local errbuf = ffi.new("char[?]", ERRLEN) -- cdata objects are garbage collected
     local rd_consumer = librdkafka.rd_kafka_new(librdkafka.RD_KAFKA_CONSUMER, rd_config, errbuf, ERRLEN)
-
     if rd_consumer == nil then
         return ffi.string(errbuf)
     end
 
+    -- redirect all events polling to rd_kafka_consumer_poll function
+    local err = librdkafka.rd_kafka_poll_set_consumer(rd_consumer)
+    if err ~= librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
+        return ffi.string(librdkafka.rd_kafka_err2str(err))
+    end
+
     for _, broker in ipairs(self.config:get_brokers_list()) do
-        librdkafka.rd_kafka_brokers_add(rd_consumer, broker)
+        if librdkafka.rd_kafka_brokers_add(rd_consumer, broker) < 1 then
+            return "no valid brokers specified"
+        end
     end
 
     self._rd_consumer = rd_consumer
@@ -181,6 +238,8 @@ function Consumer:subscribe(topics)
 
     local list = librdkafka.rd_kafka_topic_partition_list_new(#topics)
     for _, topic in ipairs(topics) do
+        print(topic, librdkafka.RD_KAFKA_PARTITION_UA)
+--        librdkafka.rd_kafka_topic_partition_list_add(list, topic, librdkafka.RD_KAFKA_PARTITION_UA)
         librdkafka.rd_kafka_topic_partition_list_add(list, topic, 0)
     end
 

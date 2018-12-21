@@ -1,19 +1,28 @@
 local box = require('box')
+local os = require("os")
 local fiber = require('fiber')
 local kafka_consumer = require('kafka.consumer')
 
 box.cfg{}
 
 local BROKERS_ADDRESS = { "kafka" }
-local TOPIC_NAME = "test_consumer"
+local TOPIC_NAME = "test_producer"
 
-local config = kafka_consumer.ConsumerConfig.create(BROKERS_ADDRESS)
+local config = kafka_consumer.ConsumerConfig.create(BROKERS_ADDRESS, "test_consumer5", false)
 
 local consumer = kafka_consumer.Consumer.create(config)
 
-consumer:start()
+local err = consumer:start()
+if err ~= nil then
+    print(err)
+    os.exit(1)
+end
 
-consumer:subscribe({TOPIC_NAME})
+local err = consumer:subscribe({TOPIC_NAME})
+if err ~= nil then
+    print(err)
+    os.exit(1)
+end
 
 for i = 0, 1 do
     fiber.create(function()
@@ -36,6 +45,6 @@ for i = 0, 1 do
     end)
 end
 
-fiber.sleep(2)
+fiber.sleep(10)
 
 consumer:stop()

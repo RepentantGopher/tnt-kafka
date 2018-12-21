@@ -1,6 +1,8 @@
 local ffi = require 'ffi'
 
 ffi.cdef[[
+    static const int32_t RD_KAFKA_PARTITION_UA = ((int32_t)-1);
+
     typedef struct rd_kafka_s rd_kafka_t;
     typedef struct rd_kafka_conf_s rd_kafka_conf_t;
     typedef struct rd_kafka_topic_s rd_kafka_topic_t;
@@ -46,6 +48,8 @@ ffi.cdef[[
             char *errstr, size_t errstr_size);
     void rd_kafka_conf_set_dr_msg_cb (rd_kafka_conf_t *conf, void (*dr_msg_cb) (rd_kafka_t *rk,
             const rd_kafka_message_t *rkmessage, void *opaque));
+    void rd_kafka_conf_set_consume_cb (rd_kafka_conf_t *conf, void (*consume_cb) (rd_kafka_message_t *rkmessage,
+            void *opaque));
     void rd_kafka_conf_set_error_cb (rd_kafka_conf_t *conf, void  (*error_cb) (rd_kafka_t *rk, int err,
             const char *reason, void *opaque));
     void rd_kafka_conf_set_stats_cb (rd_kafka_conf_t *conf, int (*stats_cb) (rd_kafka_t *rk, char *json,
@@ -115,6 +119,8 @@ ffi.cdef[[
 
     rd_kafka_resp_err_t rd_kafka_commit (rd_kafka_t *rk, const rd_kafka_topic_partition_list_t *offsets, int async);
     rd_kafka_resp_err_t rd_kafka_commit_message (rd_kafka_t *rk, const rd_kafka_message_t *rkmessage, int async);
+
+    rd_kafka_resp_err_t rd_kafka_poll_set_consumer (rd_kafka_t *rk);
 ]]
 
 local librdkafka = ffi.load("librdkafka.so.1")
