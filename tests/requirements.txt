@@ -1,0 +1,4 @@
+pytest
+kafka-python==1.4.3
+aiokafka
+tarantool

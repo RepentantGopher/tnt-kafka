@@ -6,4 +6,4 @@ ADD . /opt/tarantool
 
 WORKDIR /opt/tarantool
 
-ENTRYPOINT tarantool /opt/tarantool/tests/consumer.lua
+ENTRYPOINT tarantool /opt/tarantool/tests/app.lua

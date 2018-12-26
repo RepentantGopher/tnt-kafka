@@ -1,1 +1,4 @@
 .idea
+tests/venv
+tests/.pytest_cache
+tests/__*

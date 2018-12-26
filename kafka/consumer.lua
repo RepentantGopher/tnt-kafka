@@ -1,5 +1,5 @@
+local log = require("log")
 local ffi = require('ffi')
-local box = require('box')
 local fiber = require('fiber')
 local librdkafka = require('kafka.librdkafka')
 
@@ -7,19 +7,30 @@ local ConsumerConfig = {}
 
 ConsumerConfig.__index = ConsumerConfig
 
-function ConsumerConfig.create(brokers_list, consumer_group, enable_auto_commit)
-    assert(brokers_list ~= nil)
-    assert(consumer_group ~= nil)
-    assert(enable_auto_commit ~= nil)
+function ConsumerConfig.create(brokers_list, consumer_group, enable_auto_commit, default_topic_opts)
+    if brokers_list == nil then
+        return nil, "brokers list must not be nil"
+    end
+    if consumer_group == nil then
+        return nil, "consumer group must not be nil"
+    end
+    if enable_auto_commit == nil then
+        return nil, "enable_auto_commit flag must not be nil"
+    end
+
+    if default_topic_opts == nil then
+        return nil, "default_topic_opts must not be nil"
+    end
 
     local config = {
         _brokers_list = brokers_list,
         _consumer_group = consumer_group,
         _enable_auto_commit = enable_auto_commit,
         _options = {},
+        _topic_opts = default_topic_opts,
     }
     setmetatable(config, ConsumerConfig)
-    return config
+    return config, nil
 end
 
 function ConsumerConfig:get_brokers_list()
@@ -40,6 +51,10 @@ end
 
 function ConsumerConfig:get_options()
     return self._options
+end
+
+function ConsumerConfig:get_default_topic_options()
+    return self._topic_opts
 end
 
 local ConsumerMessage = {}
@@ -94,7 +109,9 @@ local Consumer = {}
 Consumer.__index = Consumer
 
 function Consumer.create(config)
-    assert(config ~= nil)
+    if config == nil then
+        return nil, "config must not be nil"
+    end
 
     local consumer = {
         config = config,
@@ -102,15 +119,16 @@ function Consumer.create(config)
         _output_ch = nil,
     }
     setmetatable(consumer, Consumer)
-    return consumer
+    return consumer, nil
 end
 
 function Consumer:_get_topic_rd_config(config)
     local rd_config = librdkafka.rd_kafka_topic_conf_new()
 
-    ffi.gc(rd_config, function (rd_config)
-        librdkafka.rd_kafka_topic_conf_destroy(rd_config)
-    end)
+--    FIXME: sometimes got segfault here
+--    ffi.gc(rd_config, function (rd_config)
+--        librdkafka.rd_kafka_topic_conf_destroy(rd_config)
+--    end)
 
     local ERRLEN = 256
     for key, value in pairs(config) do
@@ -127,7 +145,7 @@ end
 function Consumer:_get_consumer_rd_config()
     local rd_config = librdkafka.rd_kafka_conf_new()
 
--- FIXME: почему мы здесь получаем segfault, а в продьюсере с таким же кодом все ок?
+-- FIXME: why we got segfault here?
 --    ffi.gc(rd_config, function (rd_config)
 --        librdkafka.rd_kafka_conf_destroy(rd_config)
 --    end)
@@ -158,23 +176,18 @@ function Consumer:_get_consumer_rd_config()
         end
     end
 
-    librdkafka.rd_kafka_conf_set_consume_cb(rd_config,
-        function(rkmessage)
-            self._output_ch:put(ConsumerMessage.create(rkmessage))
-        end)
-
     librdkafka.rd_kafka_conf_set_error_cb(rd_config,
         function(rk, err, reason)
-            print("error", tonumber(err), ffi.string(reason))
+            log.error("rdkafka error code=%d reason=%s", tonumber(err), ffi.string(reason))
         end)
 
 
     librdkafka.rd_kafka_conf_set_log_cb(rd_config,
         function(rk, level, fac, buf)
-            print("log", tonumber(level), ffi.string(fac), ffi.string(buf))
+            log.info("%s - %s", ffi.string(fac), ffi.string(buf))
         end)
 
-    local rd_topic_config, err = self:_get_topic_rd_config({["auto.offset.reset"] = "earliest"})
+    local rd_topic_config, err = self:_get_topic_rd_config(self.config:get_default_topic_options())
     if err ~= nil then
         return nil, err
     end
@@ -186,14 +199,18 @@ end
 
 function Consumer:_poll()
     while true do
-        librdkafka.rd_kafka_poll(self._rd_consumer, 1)
-        local rd_message = librdkafka.rd_kafka_consumer_poll(self._rd_consumer, 1)
-        if rd_message ~= nil and rd_message.err ~= librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
-            -- FIXME: properly log this
-            print(ffi.string(librdkafka.rd_kafka_err2str(rd_message.err)))
+        -- lower timeout value can lead to broken payload
+        librdkafka.rd_kafka_poll(self._rd_consumer, 10)
+        local rd_message = librdkafka.rd_kafka_consumer_poll(self._rd_consumer, 10)
+        if rd_message ~= nil then
+            if rd_message.err == librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
+                self._output_ch:put(ConsumerMessage.create(rd_message))
+            else
+                -- FIXME: properly log this
+                log.error("rdkafka poll: %s", ffi.string(librdkafka.rd_kafka_err2str(rd_message.err)))
+            end
         end
-
-        fiber.yield()
+        fiber.sleep(0.01)
     end
 end
 
@@ -210,12 +227,6 @@ function Consumer:start()
     local rd_consumer = librdkafka.rd_kafka_new(librdkafka.RD_KAFKA_CONSUMER, rd_config, errbuf, ERRLEN)
     if rd_consumer == nil then
         return ffi.string(errbuf)
-    end
-
-    -- redirect all events polling to rd_kafka_consumer_poll function
-    local err = librdkafka.rd_kafka_poll_set_consumer(rd_consumer)
-    if err ~= librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
-        return ffi.string(librdkafka.rd_kafka_err2str(err))
     end
 
     for _, broker in ipairs(self.config:get_brokers_list()) do
@@ -246,10 +257,15 @@ function Consumer:stop(timeout_ms)
     self._output_ch:close()
 
     -- FIXME: handle this error
-    local err = librdkafka.rd_kafka_consumer_close(self._rd_consumer)
+    local err_no = librdkafka.rd_kafka_consumer_close(self._rd_consumer)
+    if err_no ~= librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
+        return ffi.string(librdkafka.rd_kafka_err2str(err_no))
+    end
 
-    librdkafka.rd_kafka_destroy(self._rd_consumer)
-    librdkafka.rd_kafka_wait_destroyed(timeout_ms)
+--    FIXME: sometimes rd_kafka_destroy hangs forever(
+--    librdkafka.rd_kafka_destroy(self._rd_consumer)
+--    librdkafka.rd_kafka_wait_destroyed(timeout_ms)
+
     self._rd_consumer = nil
 
     return nil
@@ -271,13 +287,14 @@ function Consumer:subscribe(topics)
         err = ffi.string(librdkafka.rd_kafka_err2str(err_no))
     end
 
+
     librdkafka.rd_kafka_topic_partition_list_destroy(list)
 
     return err
 end
 
 function Consumer:output()
-    if self._rd_consumer == nil then
+    if self._output_ch == nil then
         return nil, "'output' method must be called only after consumer was started "
     end
 

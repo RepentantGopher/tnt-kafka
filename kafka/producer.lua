@@ -1,5 +1,5 @@
 local ffi = require('ffi')
-local box = require('box')
+local log = require('log')
 local fiber = require('fiber')
 local librdkafka = require('kafka.librdkafka')
 
@@ -7,23 +7,30 @@ local ProducerConfig = {}
 
 ProducerConfig.__index = ProducerConfig
 
-function ProducerConfig.create(brokers_list)
-    assert(brokers_list ~= nil)
+function ProducerConfig.create(brokers_list, sync_producer)
+    if brokers_list == nil then
+        return nil, "brokers list must not be nil"
+    end
+    if sync_producer == nil then
+        return nil, "sync producer variable must not be nil"
+    end
 
     local config = {
         _brokers_list = brokers_list,
+        _sync_producer = sync_producer,
         _options = {},
-        _delivery_cb = nil,
         _stat_cb = nil,
-        _error_cb = nil,
-        _log_cb = nil,
     }
     setmetatable(config, ProducerConfig)
-    return config
+    return config, nil
 end
 
 function ProducerConfig:get_brokers_list()
     return self._brokers_list
+end
+
+function ProducerConfig:has_sync_producer()
+    return self._sync_producer
 end
 
 function ProducerConfig:set_option(name, value)
@@ -34,14 +41,6 @@ function ProducerConfig:get_options()
     return self._options
 end
 
---[[
-    Set statistics callback.
-    The statistics callback is called from `KafkaProducer:poll` every
-    `statistics.interval.ms` (needs to be configured separately).
-    Format: callback_function(json)
-    'json' - String containing the statistics data in JSON format
-]]--
-
 function ProducerConfig:set_stat_cb(callback)
     self._stat_cb = callback
 end
@@ -50,44 +49,14 @@ function ProducerConfig:get_stat_cb()
     return self._stat_cb
 end
 
-
---[[
-    Set error callback.
-    The error callback is used by librdkafka to signal critical errors
-    back to the application.
-    Format: callback_function(err_numb, reason)
-]]--
-
-function ProducerConfig:set_error_cb(callback)
-    self._error_cb = callback
-end
-
-function ProducerConfig:get_error_cb()
-    return self._error_cb
-end
-
---[[
-    Set logger callback.
-    The default is to print to stderr.
-    Alternatively the application may provide its own logger callback.
-    Or pass 'callback' as nil to disable logging.
-    Format: callback_function(level, fac, buf)
-]]--
-
-function ProducerConfig:set_log_cb(callback)
-    self._log_cd = callback
-end
-
-function ProducerConfig:get_log_cb()
-    return self._log_cd
-end
-
 local Producer = {}
 
 Producer.__index = Producer
 
 function Producer.create(config)
-    assert(config ~= nil)
+    if config == nil then
+        return nil, "config must not be nil"
+    end
 
     local producer = {
         config = config,
@@ -97,7 +66,7 @@ function Producer.create(config)
         _delivery_map = {},
     }
     setmetatable(producer, Producer)
-    return producer
+    return producer, nil
 end
 
 function Producer:_get_producer_rd_config()
@@ -115,17 +84,19 @@ function Producer:_get_producer_rd_config()
         end
     end
 
-    librdkafka.rd_kafka_conf_set_dr_msg_cb(rd_config,
-        function(rk, rkmessage)
-            local delivery_chan = self._delivery_map[tonumber(ffi.cast('intptr_t', rkmessage._private))]
-            if delivery_chan ~= nil then
-                local errstr = nil
-                if rkmessage.err ~= librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
-                    errstr = ffi.string(librdkafka.rd_kafka_err2str(rkmessage.err))
+    if self.config:has_sync_producer() then
+        librdkafka.rd_kafka_conf_set_dr_msg_cb(rd_config,
+            function(rk, rkmessage)
+                local delivery_chan = self._delivery_map[tonumber(ffi.cast('intptr_t', rkmessage._private))]
+                if delivery_chan ~= nil then
+                    local errstr = nil
+                    if rkmessage.err ~= librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
+                        errstr = ffi.string(librdkafka.rd_kafka_err2str(rkmessage.err))
+                    end
+                    delivery_chan:put(errstr)
                 end
-                delivery_chan:put(errstr)
-            end
-        end)
+            end)
+    end
 
     local stat_cb = self.config:get_stat_cb()
     if stat_cb ~= nil then
@@ -136,28 +107,23 @@ function Producer:_get_producer_rd_config()
             end)
     end
 
-    local error_cb = self.config:get_error_cb()
-    if error_cb ~= nil then
-        librdkafka.rd_kafka_conf_set_error_cb(rd_config,
-            function(rk, err, reason)
-                error_cb(tonumber(err), ffi.string(reason))
-            end)
-    end
 
-    local log_cb = self.config:get_log_cb()
-    if log_cb ~= nil then
-        librdkafka.rd_kafka_conf_set_log_cb(rd_config,
-            function(rk, level, fac, buf)
-                log_cb(tonumber(level), ffi.string(fac), ffi.string(buf))
-            end)
-    end
+    librdkafka.rd_kafka_conf_set_error_cb(rd_config,
+        function(rk, err, reason)
+            log.error("rdkafka error code=%d reason=%s", tonumber(err), ffi.string(reason))
+        end)
+
+    librdkafka.rd_kafka_conf_set_log_cb(rd_config,
+        function(rk, level, fac, buf)
+            log.info("%s - %s", ffi.string(fac), ffi.string(buf))
+        end)
 
     return rd_config, nil
 end
 
 function Producer:_poll()
     while true do
-        librdkafka.rd_kafka_poll(self._rd_producer, 1)
+        librdkafka.rd_kafka_poll(self._rd_producer, 10)
         fiber.yield()
     end
 end
@@ -220,9 +186,10 @@ end
 function Producer:_get_topic_rd_config(config)
     local rd_config = librdkafka.rd_kafka_topic_conf_new()
 
-    ffi.gc(rd_config, function (rd_config)
-        librdkafka.rd_kafka_topic_conf_destroy(rd_config)
-    end)
+--    FIXME: sometimes got segfault here
+--    ffi.gc(rd_config, function (rd_config)
+--        librdkafka.rd_kafka_topic_conf_destroy(rd_config)
+--    end)
 
     local ERRLEN = 256
     for key, value in pairs(config) do
@@ -265,13 +232,8 @@ function Producer:_produce_async(msg, id)
         return "'produce' method must be called only after producer was started "
     end
 
-    local keylen = 0
-    if msg.key then keylen = #msg.key end
-
     if msg.value == nil or #msg.value == 0 then
-        if keylen == 0 then
-            return
-        end
+        return "go empty message value"
     end
 
     local partition = -1
@@ -285,9 +247,16 @@ function Producer:_produce_async(msg, id)
         rd_topic = self._rd_topics[msg.topic]
     end
 
+    -- FIXME: non nil partition key produce segfault
     local RD_KAFKA_MSG_F_COPY = 0x2
-    local produce_result = librdkafka.rd_kafka_produce(rd_topic, partition, RD_KAFKA_MSG_F_COPY,
-        ffi.cast("void*", msg.value), #msg.value, ffi.cast("void*", msg.key), keylen, ffi.cast("void*", id))
+    local produce_result = librdkafka.rd_kafka_produce(
+        rd_topic,
+        partition,
+        RD_KAFKA_MSG_F_COPY,
+        ffi.cast("void*", msg.value), #msg.value,
+        nil, 0,
+        ffi.cast("void*", id)
+    )
 
     if produce_result == -1 then
         return ffi.string(librdkafka.rd_kafka_err2str(librdkafka.rd_kafka_errno2err(ffi.errno())))
@@ -301,6 +270,10 @@ function Producer:produce_async(msg)
 end
 
 function Producer:produce(msg)
+    if not self.config:has_sync_producer() then
+        return "sync producer is not available via configuration"
+    end
+
     self._counter = self._counter + 1
     local id = self._counter
     local delivery_chan = fiber.channel()

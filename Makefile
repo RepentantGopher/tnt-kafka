@@ -37,12 +37,18 @@ docker-create-test-topic:
 		kafka-topics --create --topic test_producer --partitions 1 --replication-factor 1 \
 		--if-not-exists --zookeeper zookeeper:2181
 
+	docker run \
+		--net=${NETWORK} \
+		--rm confluentinc/cp-kafka:5.0.0 \
+		kafka-topics --create --topic test_consumer --partitions 1 --replication-factor 1 \
+		--if-not-exists --zookeeper zookeeper:2181
+
 docker-read-topic-data:
 	docker run \
       --net=${NETWORK} \
       --rm \
       confluentinc/cp-kafka:5.0.0 \
-      kafka-console-consumer --bootstrap-server kafka:9092 --topic test_producer --from-beginning
+      kafka-console-consumer --bootstrap-server kafka:9092 --topic test_consumer --from-beginning
 
 APP_NAME = kafka-test
 APP_IMAGE = kafka-test-image
@@ -55,6 +61,7 @@ docker-remove-app:
 
 docker-run-app: docker-build-app docker-remove-app
 	docker run -d \
+		-p 3301:3301 \
 		--net ${NETWORK} \
 		--name ${APP_NAME} \
 		-e KAFKA_BROKERS=kafka:9092 \
@@ -62,6 +69,7 @@ docker-run-app: docker-build-app docker-remove-app
 
 docker-run-interactive: docker-build-app docker-remove-app
 	docker run -it \
+		-p 3301:3301 \
 		--net ${NETWORK} \
 		--name ${APP_NAME} \
 		-e KAFKA_BROKERS=kafka:9092 \
@@ -79,5 +87,46 @@ docker-run-all: \
 	docker-run-zoo \
 	docker-run-kafka \
 	docker-build-app \
-	docker-create-test-topic \
 	docker-run-app
+
+#######################################################################
+# Tests
+
+tests-dep:
+	cd ./tests && \
+        python3 -m venv venv && \
+		. venv/bin/activate && \
+		pip install -r requirements.txt && \
+    	deactivate
+
+tests-run:
+	cd ./tests && \
+		. venv/bin/activate && \
+		pytest -vv && \
+		deactivate
+
+test-run-with-docker: tests-dep docker-run-all
+	sleep 5
+
+	docker run \
+		--net=${NETWORK} \
+		--rm confluentinc/cp-kafka:5.0.0 \
+		kafka-topics --create --topic test_producer --partitions 1 --replication-factor 1 \
+		--if-not-exists --zookeeper zookeeper:2181
+
+	docker run \
+		--net=${NETWORK} \
+		--rm confluentinc/cp-kafka:5.0.0 \
+		kafka-topics --create --topic test_consumer --partitions 1 --replication-factor 1 \
+		--if-not-exists --zookeeper zookeeper:2181
+
+	cd ./tests && \
+		python3 -m venv venv && \
+		. venv/bin/activate && \
+		pip install -r requirements.txt && \
+		deactivate
+
+	cd ./tests && \
+		. venv/bin/activate && \
+		pytest -vv && \
+		deactivate

@@ -1,35 +1,54 @@
-local box = require('box')
+local os = require('os')
 local fiber = require('fiber')
 local kafka_producer = require('kafka.producer')
-
-box.cfg{}
 
 local BROKERS_ADDRESS = { "kafka" }
 local TOPIC_NAME = "test_producer"
 
-local config = kafka_producer.ProducerConfig.create(BROKERS_ADDRESS)
+return function(messages)
+    local config, err = kafka_producer.ProducerConfig.create(BROKERS_ADDRESS, true)
+    if err ~= nil then
+        print(err)
+        os.exit(1)
+    end
 
-config:set_option("statistics.interval.ms", "1000")
-config:set_stat_cb(function (payload) print("Stat Callback '"..payload.."'") end)
+    config:set_option("statistics.interval.ms", "1000")
+    config:set_stat_cb(function (payload) print("Stat Callback '".. payload.. "'") end)
 
-local producer = kafka_producer.Producer.create(config)
+    local producer, err = kafka_producer.Producer.create(config)
+    if err ~= nil then
+        print(err)
+        os.exit(1)
+    end
 
-producer:start()
+    local err = producer:start()
+    if err ~= nil then
+        print(err)
+        os.exit(1)
+    end
 
-producer:add_topic(TOPIC_NAME, {})
+    local err = producer:add_topic(TOPIC_NAME, {})
+    if err ~= nil then
+        print(err)
+        os.exit(1)
+    end
 
-for i = 0, 10 do
-    fiber.create(function()
-        local value =  "this is test message" .. tostring(i)
-        local err = producer:produce({topic = TOPIC_NAME, value = value})
-        if err ~= nil then
-            print(string.format("got error '%s' while sending value '%s'", err, value))
-        else
-            print(string.format("successfully sent value '%s'", value))
-        end
-    end)
+    for _, message in ipairs(messages) do
+        fiber.create(function()
+            local err = producer:produce({topic = TOPIC_NAME, value = message})
+            if err ~= nil then
+                print(string.format("got error '%s' while sending value '%s'", err, message))
+            else
+                print(string.format("successfully sent value '%s'", message))
+            end
+        end)
+    end
+
+    fiber.sleep(2)
+
+    local err = producer:stop()
+    if err ~= nil then
+        print(err)
+        os.exit(1)
+    end
 end
-
-fiber.sleep(2)
-
-producer:stop()

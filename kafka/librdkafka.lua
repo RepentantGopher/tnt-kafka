@@ -126,5 +126,5 @@ ffi.cdef[[
 ]]
 
 local librdkafka = ffi.load("librdkafka.so.1")
-return librdkafka
 
+return librdkafka
