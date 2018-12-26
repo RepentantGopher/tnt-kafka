@@ -1,6 +1,6 @@
 local os = require('os')
 local fiber = require('fiber')
-local kafka_producer = require('kafka.producer')
+local kafka_producer = require('tnt-kafka.producer')
 
 local BROKERS_ADDRESS = { "kafka" }
 local TOPIC_NAME = "test_producer"

@@ -1,7 +1,7 @@
 local ffi = require('ffi')
 local log = require('log')
 local fiber = require('fiber')
-local librdkafka = require('kafka.librdkafka')
+local librdkafka = require('tnt-kafka.librdkafka')
 
 local ProducerConfig = {}
 

@@ -1,7 +1,7 @@
 local log = require("log")
 local os = require("os")
 local fiber = require('fiber')
-local kafka_consumer = require('kafka.consumer')
+local kafka_consumer = require('tnt-kafka.consumer')
 
 local BROKERS_ADDRESS = { "kafka" }
 local TOPIC_NAME = "test_consumer"
