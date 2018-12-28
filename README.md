@@ -26,7 +26,7 @@ errors as strings which allows you to decide how to handle it.
     local config, err = kafka_consumer.ConsumerConfig.create(
         {"localhost:9092"}, -- array of brokers 
         "test_consumer", -- consumer group
-        true, -- enable_auto_commit
+        true, -- enable auto offset store
         {["auto.offset.reset"] = "earliest"} -- default configuration for topics
     )
     if err ~= nil then
@@ -94,7 +94,7 @@ errors as strings which allows you to decide how to handle it.
     local config, err = kafka_consumer.ConsumerConfig.create(
         {"localhost:9092"}, -- array of brokers 
         "test_consumer", -- consumer group
-        false, -- enable_auto_commit
+        false, -- disable auto offset store
         {["auto.offset.reset"] = "earliest"} -- default configuration for topics
     )
     if err ~= nil then
