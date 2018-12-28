@@ -20,15 +20,19 @@ docker-run-zoo: docker-remove-zoo
 docker-remove-kafka:
 	docker rm -f kafka || true
 
+docker-pull-kafka:
+	docker pull wurstmeister/kafka
+
 docker-run-kafka: docker-remove-kafka
 	docker run -d \
         --net=${NETWORK} \
         --name=kafka \
         -p 9092:9092 \
         -e KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181 \
+        -e KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092 \
         -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092 \
         -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
-        confluentinc/cp-kafka:5.0.0
+        wurstmeister/kafka
 
 docker-create-test-topic:
 	docker run \
@@ -81,11 +85,15 @@ docker-remove-all: \
 	docker-remove-zoo \
 	docker-remove-network
 
-docker-run-all: \
+docker-run-environment: \
 	docker-remove-all \
 	docker-create-network \
 	docker-run-zoo \
-	docker-run-kafka \
+	docker-run-kafka
+
+docker-run-all: \
+	docker-run-environment \
+	docker-create-network \
 	docker-build-app \
 	docker-run-app
 
@@ -130,3 +138,102 @@ test-run-with-docker: tests-dep docker-run-all
 		. venv/bin/activate && \
 		pytest -vv && \
 		deactivate
+
+#######################################################################
+# Benchmarks
+
+docker-create-benchmark-async-producer-topic:
+	docker run \
+		--net=${NETWORK} \
+		--rm confluentinc/cp-kafka:5.0.0 \
+		kafka-topics --create --topic async_producer_benchmark --partitions 2 --replication-factor 1 \
+		--if-not-exists --zookeeper zookeeper:2181
+
+docker-run-benchmark-async-producer-interactive: docker-build-app docker-remove-app
+	docker run -it \
+		-p 3301:3301 \
+		--net ${NETWORK} \
+		--name ${APP_NAME} \
+		--entrypoint "tarantool" \
+		-e KAFKA_BROKERS=kafka:9092 \
+		${APP_IMAGE} \
+		/opt/tarantool/benchmarks/async_producer.lua
+
+docker-read-benchmark-async-producer-topic-data:
+	docker run \
+      --net=${NETWORK} \
+      --rm \
+      confluentinc/cp-kafka:5.0.0 \
+      kafka-console-consumer --bootstrap-server kafka:9092 --topic async_producer_benchmark --from-beginning
+
+docker-create-benchmark-sync-producer-topic:
+	docker run \
+		--net=${NETWORK} \
+		--rm confluentinc/cp-kafka:5.0.0 \
+		kafka-topics --create --topic sync_producer_benchmark --partitions 2 --replication-factor 1 \
+		--if-not-exists --zookeeper zookeeper:2181
+
+docker-run-benchmark-sync-producer-interactive: docker-build-app docker-remove-app
+	docker run -it \
+		-p 3301:3301 \
+		--net ${NETWORK} \
+		--name ${APP_NAME} \
+		--entrypoint "tarantool" \
+		-e KAFKA_BROKERS=kafka:9092 \
+		${APP_IMAGE} \
+		/opt/tarantool/benchmarks/sync_producer.lua
+
+docker-read-benchmark-sync-producer-topic-data:
+	docker run \
+		--net=${NETWORK} \
+		--rm \
+		confluentinc/cp-kafka:5.0.0 \
+		kafka-console-consumer --bootstrap-server kafka:9092 --topic sync_producer_benchmark --from-beginning
+
+docker-create-benchmark-auto-offset-store-consumer-topic:
+	docker run \
+		--net=${NETWORK} \
+		--rm confluentinc/cp-kafka:5.0.0 \
+		kafka-topics --create --topic auto_offset_store_consumer_benchmark --partitions 2 --replication-factor 1 \
+		--if-not-exists --zookeeper zookeeper:2181
+
+docker-run-benchmark-auto-offset-store-consumer-interactive: docker-build-app docker-remove-app
+	docker run -it \
+		-p 3301:3301 \
+		--net ${NETWORK} \
+		--name ${APP_NAME} \
+		--entrypoint "tarantool" \
+		-e KAFKA_BROKERS=kafka:9092 \
+		${APP_IMAGE} \
+		/opt/tarantool/benchmarks/auto_offset_store_consumer.lua
+
+docker-read-benchmark-auto-offset-store-consumer-topic-data:
+	docker run \
+		--net=${NETWORK} \
+		--rm \
+		confluentinc/cp-kafka:5.0.0 \
+		kafka-console-consumer --bootstrap-server kafka:9092 --topic auto_offset_store_consumer_benchmark --from-beginning
+
+docker-create-benchmark-manual-commit-consumer-topic:
+	docker run \
+		--net=${NETWORK} \
+		--rm confluentinc/cp-kafka:5.0.0 \
+		kafka-topics --create --topic manual_offset_store_consumer --partitions 2 --replication-factor 1 \
+		--if-not-exists --zookeeper zookeeper:2181
+
+docker-run-benchmark-manual-commit-consumer-interactive: docker-build-app docker-remove-app
+	docker run -it \
+		-p 3301:3301 \
+		--net ${NETWORK} \
+		--name ${APP_NAME} \
+		--entrypoint "tarantool" \
+		-e KAFKA_BROKERS=kafka:9092 \
+		${APP_IMAGE} \
+		/opt/tarantool/benchmarks/manual_offset_store_consumer.lua
+
+docker-read-benchmark-manual-commit-consumer-topic-data:
+	docker run \
+		--net=${NETWORK} \
+		--rm \
+		confluentinc/cp-kafka:5.0.0 \
+		kafka-console-consumer --bootstrap-server kafka:9092 --topic manual_offset_store_consumer --from-beginning

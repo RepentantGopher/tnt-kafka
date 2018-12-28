@@ -56,7 +56,7 @@ local function consume()
                 if msg ~= nil then
                     print(string.format("got msg with topic='%s' partition='%s' offset='%s' value='%s'", msg:topic(), msg:partition(), msg:offset(), msg:value()))
                     table.insert(consumed, msg:value())
-                    local err = consumer:commit_async(msg)
+                    local err = consumer:store_offset(msg)
                     if err ~= nil then
                         print(string.format("got error '%s' while commiting msg from topic '%s'", err, msg:topic()))
                     end

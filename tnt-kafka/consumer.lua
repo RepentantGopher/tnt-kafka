@@ -7,15 +7,15 @@ local ConsumerConfig = {}
 
 ConsumerConfig.__index = ConsumerConfig
 
-function ConsumerConfig.create(brokers_list, consumer_group, enable_auto_commit, default_topic_opts)
+function ConsumerConfig.create(brokers_list, consumer_group, auto_offset_store, default_topic_opts)
     if brokers_list == nil then
         return nil, "brokers list must not be nil"
     end
     if consumer_group == nil then
         return nil, "consumer group must not be nil"
     end
-    if enable_auto_commit == nil then
-        return nil, "enable_auto_commit flag must not be nil"
+    if auto_offset_store == nil then
+        return nil, "auto_offset_store flag must not be nil"
     end
 
     if default_topic_opts == nil then
@@ -25,7 +25,7 @@ function ConsumerConfig.create(brokers_list, consumer_group, enable_auto_commit,
     local config = {
         _brokers_list = brokers_list,
         _consumer_group = consumer_group,
-        _enable_auto_commit = enable_auto_commit,
+        _auto_offset_store = auto_offset_store,
         _options = {},
         _topic_opts = default_topic_opts,
     }
@@ -41,8 +41,8 @@ function ConsumerConfig:get_consumer_group()
     return self._consumer_group
 end
 
-function ConsumerConfig:get_enable_auto_commit()
-    return self._enable_auto_commit
+function ConsumerConfig:get_auto_offset_store()
+    return self._auto_offset_store
 end
 
 function ConsumerConfig:set_option(name, value)
@@ -92,14 +92,14 @@ end
 
 function ConsumerMessage:partition()
     if self._partition == nil then
-        self._partition = 1
+        self._partition = tonumber(self._rd_message.partition)
     end
     return self._partition
 end
 
 function ConsumerMessage:offset()
     if self._offset == nil then
-        self._offset = 1
+        self._offset = tonumber64(self._rd_message.offset)
     end
     return self._offset
 end
@@ -156,16 +156,16 @@ function Consumer:_get_consumer_rd_config()
         return nil, ffi.string(errbuf)
     end
 
-    local enable_auto_commit
-    if self.config:get_enable_auto_commit() then
-        enable_auto_commit = "true"
+    local auto_offset_store
+    if self.config:get_auto_offset_store() then
+        auto_offset_store = "true"
     else
-        enable_auto_commit = "false"
+        auto_offset_store = "false"
     end
 
     local ERRLEN = 256
     local errbuf = ffi.new("char[?]", ERRLEN) -- cdata objects are garbage collected
-    if librdkafka.rd_kafka_conf_set(rd_config, "enable.auto.commit", enable_auto_commit, errbuf, ERRLEN) ~= librdkafka.RD_KAFKA_CONF_OK then
+    if librdkafka.rd_kafka_conf_set(rd_config, "enable.auto.offset.store", auto_offset_store, errbuf, ERRLEN) ~= librdkafka.RD_KAFKA_CONF_OK then
         return nil, ffi.string(errbuf)
     end
 
@@ -200,7 +200,6 @@ end
 function Consumer:_poll()
     while true do
         -- lower timeout value can lead to broken payload
-        librdkafka.rd_kafka_poll(self._rd_consumer, 10)
         local rd_message = librdkafka.rd_kafka_consumer_poll(self._rd_consumer, 10)
         if rd_message ~= nil then
             if rd_message.err == librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
@@ -210,7 +209,7 @@ function Consumer:_poll()
                 log.error("rdkafka poll: %s", ffi.string(librdkafka.rd_kafka_err2str(rd_message.err)))
             end
         end
-        fiber.sleep(0.01)
+        fiber.yield()
     end
 end
 
@@ -229,6 +228,11 @@ function Consumer:start()
         return ffi.string(errbuf)
     end
 
+    local err_no = librdkafka.rd_kafka_poll_set_consumer(rd_consumer)
+    if err_no ~= librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
+        return ffi.string(librdkafka.rd_kafka_err2str(err_no))
+    end
+
     for _, broker in ipairs(self.config:get_brokers_list()) do
         if librdkafka.rd_kafka_brokers_add(rd_consumer, broker) < 1 then
             return "no valid brokers specified"
@@ -237,11 +241,13 @@ function Consumer:start()
 
     self._rd_consumer = rd_consumer
 
-    self._output_ch = fiber.channel(100)
+    self._output_ch = fiber.channel(10000)
 
     self._poll_fiber = fiber.create(function()
         self:_poll()
     end)
+
+    return nil
 end
 
 function Consumer:stop(timeout_ms)
@@ -256,13 +262,12 @@ function Consumer:stop(timeout_ms)
     self._poll_fiber:cancel()
     self._output_ch:close()
 
-    -- FIXME: handle this error
     local err_no = librdkafka.rd_kafka_consumer_close(self._rd_consumer)
     if err_no ~= librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
         return ffi.string(librdkafka.rd_kafka_err2str(err_no))
     end
 
---    FIXME: sometimes rd_kafka_destroy hangs forever(
+--    -- FIXME: sometimes rd_kafka_destroy hangs forever
 --    librdkafka.rd_kafka_destroy(self._rd_consumer)
 --    librdkafka.rd_kafka_wait_destroyed(timeout_ms)
 
@@ -301,12 +306,16 @@ function Consumer:output()
     return self._output_ch, nil
 end
 
-function Consumer:commit_async(message)
+function Consumer:store_offset(message)
     if self._rd_consumer == nil then
-        return "'commit' method must be called only after consumer was started "
+        return "'store_offset' method must be called only after consumer was started "
     end
 
-    local err_no = librdkafka.rd_kafka_commit_message(self._rd_consumer, message._rd_message, 1)
+    if self.config:get_auto_offset_store() then
+        return "auto offset store was enabled by configuration"
+    end
+
+    local err_no = librdkafka.rd_kafka_offset_store(message._rd_message.rkt, message._rd_message.partition, message._rd_message.offset)
     if err_no ~= librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
         return ffi.string(librdkafka.rd_kafka_err2str(err_no))
     end

@@ -11,6 +11,7 @@ ffi.cdef[[
     typedef enum {
         RD_KAFKA_RESP_ERR__BEGIN = -200,
         RD_KAFKA_RESP_ERR_NO_ERROR = 0,
+        RD_KAFKA_RESP_ERR__QUEUE_FULL = -184
         /* ... */
     } rd_kafka_resp_err_t;
 
@@ -118,6 +119,8 @@ ffi.cdef[[
 
     rd_kafka_message_t *rd_kafka_consumer_poll (rd_kafka_t *rk, int timeout_ms);
     rd_kafka_resp_err_t rd_kafka_consumer_close (rd_kafka_t *rk);
+
+    rd_kafka_resp_err_t rd_kafka_offset_store(rd_kafka_topic_t *rkt, int32_t partition, int64_t offset);
 
     rd_kafka_resp_err_t rd_kafka_commit (rd_kafka_t *rk, const rd_kafka_topic_partition_list_t *offsets, int async);
     rd_kafka_resp_err_t rd_kafka_commit_message (rd_kafka_t *rk, const rd_kafka_message_t *rkmessage, int async);

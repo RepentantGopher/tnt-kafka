@@ -1,6 +1,10 @@
 tnt-kafka
 =========
-Full featured kafka library for Tarantool based on [rdkafka](https://github.com/edenhill/librdkafka).
+Full featured high performance kafka library for Tarantool based on [librdkafka](https://github.com/edenhill/librdkafka). 
+
+Can produce more then 80k messages per second and consume more then 130k messages per second.
+
+Library was tested with librdkafka v0.11.5
 
 # Features
 * Kafka producer and consumer implementations.
@@ -9,24 +13,11 @@ Full featured kafka library for Tarantool based on [rdkafka](https://github.com/
 some libraries throws lua native `error` while others throws `box.error` instead. `tnt-kafka` returns 
 errors as strings which allows you to decide how to handle it.
 
-# Known issues
-* Producer can use only random messages partitioning. It was done intentionally because non nil key 
-leads to segfault.
-* Consumer leaves some non gc'able objects in memory after has been stopped. It was done intentionally
-because `rd_kafka_destroy` sometimes hangs forever.
-
-# TODO
-* Benchmarks
-* Rocks package
-* Fix known issues
-* More examples
-* Better documentation
-
 # Examples
 
 ## Consumer
 
-### With enabled auto commit
+### With auto offset store
 ```lua
     local fiber = require('fiber')
     local os = require('os')
@@ -94,7 +85,7 @@ because `rd_kafka_destroy` sometimes hangs forever.
     end
 ```
 
-### With multiple fibers and manual commit
+### With multiple fibers and manual offset store
 ```lua
     local fiber = require('fiber')
     local os = require('os')
@@ -150,7 +141,7 @@ because `rd_kafka_destroy` sometimes hangs forever.
                         msg:topic(), msg:partition(), msg:offset(), msg:value()
                     ))
                     
-                    local err = consumer:commit_async(msg) -- don't forget to commit processed messages
+                    local err = consumer:store_offset(msg) -- don't forget to commit processed messages
                     if err ~= nil then
                         print(string.format(
                             "got error '%s' while commiting msg from topic '%s'", 
@@ -285,6 +276,69 @@ because `rd_kafka_destroy` sometimes hangs forever.
         print(err)
         os.exit(1)
     end
+```
+
+# Known issues
+* Producer can use only random messages partitioning. It was done intentionally because non nil key 
+leads to segfault.
+* Consumer leaves some non gc'able objects in memory after has been stopped. It was done intentionally
+because `rd_kafka_destroy` sometimes hangs forever.
+
+# TODO
+* Rocks package
+* Ordered storage for offsets to prevent commits unprocessed messages
+* Fix known issues
+* More examples
+* Better documentation
+
+# Benchmarks
+
+## Producer
+
+### Async
+
+Result: over 80000 produced messages per second on macbook pro 2016
+
+Local run in docker:
+```bash
+    make docker-run-environment
+    make docker-create-benchmark-async-producer-topic
+    make docker-run-benchmark-async-producer-interactive
+```
+
+### Sync
+
+Result: over 50000 produced messages per second on macbook pro 2016
+
+Local run in docker:
+```bash
+    make docker-run-environment
+    make docker-create-benchmark-sync-producer-topic
+    make docker-run-benchmark-sync-producer-interactive
+```
+
+## Consumer
+
+### Auto offset store enabled
+
+Result: over 130000 consumed messages per second on macbook pro 2016
+
+Local run in docker:
+```bash
+    make docker-run-environment
+    make docker-create-benchmark-auto-offset-store-consumer-topic
+    make docker-run-benchmark-auto-offset-store-consumer-interactive
+```
+
+### Manual offset store
+
+Result: over 130000 consumed messages per second on macbook pro 2016
+
+Local run in docker:
+```bash
+    make docker-run-environment
+    docker-create-benchmark-manual-commit-consumer-topic
+    make docker-run-benchmark-manual-commit-consumer-interactive
 ```
 
 # Developing

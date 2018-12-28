@@ -72,9 +72,10 @@ end
 function Producer:_get_producer_rd_config()
     local rd_config = librdkafka.rd_kafka_conf_new()
 
-    ffi.gc(rd_config, function (rd_config)
-        librdkafka.rd_kafka_conf_destroy(rd_config)
-    end)
+--   FIXME: got segfault here
+--    ffi.gc(rd_config, function (rd_config)
+--        librdkafka.rd_kafka_conf_destroy(rd_config)
+--    end)
 
     local ERRLEN = 256
     for key, value in pairs(self.config:get_options()) do
@@ -157,17 +158,30 @@ function Producer:start()
     return nil
 end
 
+local function len(table)
+    local count = 0
+    for _ in pairs(table) do count = count + 1 end
+    return count
+end
+
 function Producer:stop(timeout_ms)
     if self._rd_producer == nil then
         return "'stop' method must be called only after producer was started "
     end
 
     if timeout_ms == nil then
-        timeout_ms = 1000
+        timeout_ms = 3000
     end
 
-    -- FIXME: handle this error
-    local err = librdkafka.rd_kafka_flush(self._rd_producer, timeout_ms)
+    local err_no = librdkafka.rd_kafka_flush(self._rd_producer, timeout_ms)
+    if err_no ~= librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
+        return ffi.string(librdkafka.rd_kafka_err2str(err_no))
+    end
+
+    -- FIXME: potentially this can hang forever
+    while len(self._delivery_map) > 0 do
+        fiber.sleep(1)
+    end
 
     self._poll_fiber:cancel()
 
@@ -249,23 +263,33 @@ function Producer:_produce_async(msg, id)
 
     -- FIXME: non nil partition key produce segfault
     local RD_KAFKA_MSG_F_COPY = 0x2
-    local produce_result = librdkafka.rd_kafka_produce(
-        rd_topic,
-        partition,
-        RD_KAFKA_MSG_F_COPY,
-        ffi.cast("void*", msg.value), #msg.value,
-        nil, 0,
-        ffi.cast("void*", id)
-    )
+    while true do
+        local produce_result = librdkafka.rd_kafka_produce(
+            rd_topic,
+            partition,
+            RD_KAFKA_MSG_F_COPY,
+            ffi.cast("void*", msg.value), #msg.value,
+            nil, 0,
+            ffi.cast("void*", id)
+        )
 
-    if produce_result == -1 then
-        return ffi.string(librdkafka.rd_kafka_err2str(librdkafka.rd_kafka_errno2err(ffi.errno())))
+        if produce_result == -1 then
+            local errno = librdkafka.rd_kafka_errno2err(ffi.errno())
+            if errno ~= librdkafka.RD_KAFKA_RESP_ERR__QUEUE_FULL then
+                return ffi.string(librdkafka.rd_kafka_err2str(errno))
+            end
+            fiber.sleep(0.1)
+        else
+            return nil
+        end
     end
-
-    return nil
 end
 
 function Producer:produce_async(msg)
+    if self.config:has_sync_producer() then
+        return "only sync producer available via configuration"
+    end
+
     return self:_produce_async(msg, nil)
 end
 
