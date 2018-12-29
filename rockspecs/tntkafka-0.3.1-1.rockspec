@@ -1,5 +1,5 @@
 package = "tnt-kafka"
-version = "0.3.1"
+version = "0.3.1-1"
 source = {
     url = "git://github.com/RepentantGopher/tnt-kafka.git",
     tag = "v0.3.1",
