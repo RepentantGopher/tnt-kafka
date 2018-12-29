@@ -1,8 +1,8 @@
 package = "tnt-kafka"
-version = "0.3.3-1"
+version = "0.3.4-1"
 source = {
     url = "git://github.com/RepentantGopher/tnt-kafka.git",
-    tag = "v0.3.3",
+    tag = "v0.3.4",
 }
 description = {
     summary = "Kafka library for Tarantool",
@@ -16,6 +16,7 @@ build = {
     type = "builtin",
     modules = {
         ["tnt-kafka.consumer"] = "tnt-kafka/consumer.lua",
+        ["tnt-kafka.librdkafka"] = "tnt-kafka/librdkafka.lua",
         ["tnt-kafka.producer"] = "tnt-kafka/producer.lua",
     }
 }
