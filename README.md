@@ -1,5 +1,8 @@
 tnt-kafka
 =========
+
+*Project now lives in official repo of Tarantool team [github.com/tarantool/tnt-kafka](https://github.com/tarantool/tnt-kafka)*
+
 Full featured high performance kafka library for Tarantool based on [librdkafka](https://github.com/edenhill/librdkafka). 
 
 Can produce more then 80k messages per second and consume more then 130k messages per second.
