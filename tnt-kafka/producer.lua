@@ -108,24 +108,24 @@ function Producer:_get_producer_rd_config()
             end)
     end
 
-
     librdkafka.rd_kafka_conf_set_error_cb(rd_config,
         function(rk, err, reason)
             log.error("rdkafka error code=%d reason=%s", tonumber(err), ffi.string(reason))
         end)
 
-    librdkafka.rd_kafka_conf_set_log_cb(rd_config,
-        function(rk, level, fac, buf)
-            log.info("%s - %s", ffi.string(fac), ffi.string(buf))
-        end)
+    -- FiXME: rd_kafka_conf_set_log_cb leads to segfault when debug enabled
+--    librdkafka.rd_kafka_conf_set_log_cb(rd_config,
+--        function(rk, level, fac, buf)
+--            log.info("%s - %s", ffi.string(fac), ffi.string(buf))
+--        end)
 
     return rd_config, nil
 end
 
 function Producer:_poll()
     while true do
-        librdkafka.rd_kafka_poll(self._rd_producer, 10)
-        fiber.yield()
+        librdkafka.rd_kafka_poll(self._rd_producer, 1)
+        fiber.sleep(0.05)
     end
 end
 
@@ -300,7 +300,7 @@ function Producer:produce(msg)
 
     self._counter = self._counter + 1
     local id = self._counter
-    local delivery_chan = fiber.channel()
+    local delivery_chan = fiber.channel(1)
     self._delivery_map[id] = delivery_chan
 
     local err = self:_produce_async(msg, id)

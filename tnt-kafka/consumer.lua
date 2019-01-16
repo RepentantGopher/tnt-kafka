@@ -115,8 +115,9 @@ function Consumer.create(config)
 
     local consumer = {
         config = config,
-        _rd_consumer = {},
+        _rd_consumer = nil,
         _output_ch = nil,
+        _subscriptions = {},
     }
     setmetatable(consumer, Consumer)
     return consumer, nil
@@ -181,11 +182,11 @@ function Consumer:_get_consumer_rd_config()
             log.error("rdkafka error code=%d reason=%s", tonumber(err), ffi.string(reason))
         end)
 
-
-    librdkafka.rd_kafka_conf_set_log_cb(rd_config,
-        function(rk, level, fac, buf)
-            log.info("%s - %s", ffi.string(fac), ffi.string(buf))
-        end)
+    -- FiXME: rd_kafka_conf_set_log_cb leads to segfault when debug enabled
+--    librdkafka.rd_kafka_conf_set_log_cb(rd_config,
+--        function(rk, level, fac, buf)
+--            log.info("%s - %s", ffi.string(fac), ffi.string(buf))
+--        end)
 
     local rd_topic_config, err = self:_get_topic_rd_config(self.config:get_default_topic_options())
     if err ~= nil then
@@ -199,17 +200,20 @@ end
 
 function Consumer:_poll()
     while true do
-        -- lower timeout value can lead to broken payload
-        local rd_message = librdkafka.rd_kafka_consumer_poll(self._rd_consumer, 10)
+        -- lower timeout value could lead to segfault
+        local rd_message = librdkafka.rd_kafka_consumer_poll(self._rd_consumer, 5)
         if rd_message ~= nil then
             if rd_message.err == librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
                 self._output_ch:put(ConsumerMessage.create(rd_message))
             else
                 -- FIXME: properly log this
-                log.error("rdkafka poll: %s", ffi.string(librdkafka.rd_kafka_err2str(rd_message.err)))
+                log.error("rdkafka consumer poll: %s", ffi.string(librdkafka.rd_kafka_err2str(rd_message.err)))
             end
+            fiber.yield()
+        else
+            -- throtling poll
+            fiber.sleep(0.01)
         end
-        fiber.yield()
     end
 end
 
@@ -278,24 +282,38 @@ end
 
 function Consumer:subscribe(topics)
     if self._rd_consumer == nil then
-        return "'add_topic' method must be called only after consumer was started "
+        return "'sbuscribe' method must be called only after consumer was started "
     end
 
-    local list = librdkafka.rd_kafka_topic_partition_list_new(#topics)
+    local was_changed = false
     for _, topic in ipairs(topics) do
-        librdkafka.rd_kafka_topic_partition_list_add(list, topic, librdkafka.RD_KAFKA_PARTITION_UA)
+        if not self._subscriptions[topic] then
+            was_changed = true
+            self._subscriptions[topic] = true
+        end
     end
 
-    local err = nil
-    local err_no = librdkafka.rd_kafka_subscribe(self._rd_consumer, list)
-    if err_no ~= librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
-        err = ffi.string(librdkafka.rd_kafka_err2str(err_no))
+    if was_changed then
+        local subscriptions = {}
+        for topic, _ in pairs(self._subscriptions) do
+            table.insert(subscriptions, topic)
+        end
+
+        local list = librdkafka.rd_kafka_topic_partition_list_new(#subscriptions)
+        for _, topic in ipairs(subscriptions) do
+            librdkafka.rd_kafka_topic_partition_list_add(list, topic, librdkafka.RD_KAFKA_PARTITION_UA)
+        end
+
+        local err = nil
+        local err_no = librdkafka.rd_kafka_subscribe(self._rd_consumer, list)
+        if err_no ~= librdkafka.RD_KAFKA_RESP_ERR_NO_ERROR then
+            err = ffi.string(librdkafka.rd_kafka_err2str(err_no))
+        end
+
+        librdkafka.rd_kafka_topic_partition_list_destroy(list)
+
+        return err
     end
-
-
-    librdkafka.rd_kafka_topic_partition_list_destroy(list)
-
-    return err
 end
 
 function Consumer:output()
