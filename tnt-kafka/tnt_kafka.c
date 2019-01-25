@@ -42,6 +42,12 @@ lua_push_error(struct lua_State *L)
     return 2;
 }
 
+static ssize_t kafka_destroy(va_list args) {
+    rd_kafka_t *kafka = va_arg(args, rd_kafka_t *);
+    rd_kafka_destroy(kafka);
+    return 0;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /**
  * Consumer Message
@@ -252,30 +258,6 @@ lua_consumer_poll_msg(struct lua_State *L) {
 
     consumer_t *consumer = lua_check_consumer(L, 1);
 
-//    if (rd_kafka_queue_length(consumer->rd_event_queue) > 0) {
-//        rd_kafka_event_t *event = rd_kafka_queue_poll(consumer->rd_event_queue, 0);
-//        if (rd_kafka_event_type(event) == RD_KAFKA_EVENT_FETCH) {
-//            msg_t *msg;
-//            msg = malloc(sizeof(msg_t));
-//            msg->rd_message = rd_kafka_event_message_next(event);
-//            msg->rd_event = event;
-//
-//            msg_t **msg_p = (msg_t **)lua_newuserdata(L, sizeof(msg));
-//            *msg_p = msg;
-//
-//            luaL_getmetatable(L, consumer_msg_label);
-//            lua_setmetatable(L, -2);
-//            return 1;
-//        } else {
-//            lua_pushnil(L);
-//            lua_pushfstring(L,
-//                            "got unexpected event type of '%s'",
-//                            rd_kafka_event_name(event));
-//            rd_kafka_event_destroy(event);
-//            return 2;
-//        }
-//    }
-
     rd_kafka_event_t *event = rd_kafka_queue_poll(consumer->rd_msg_queue, 0);
     if (event != NULL) {
         if (rd_kafka_event_type(event) == RD_KAFKA_EVENT_FETCH) {
@@ -304,6 +286,7 @@ lua_consumer_poll_msg(struct lua_State *L) {
     return 1;
 }
 
+// TODO: implement logs and errors notifications
 //static int
 //lua_consumer_poll_logs(struct lua_State *L) {
 //
@@ -326,12 +309,6 @@ lua_consumer_store_offset(struct lua_State *L) {
     }
     return 0;
 }
-
-//static ssize_t kafka_destroy(va_list args) {
-//    rd_kafka_t *rd_consumer = va_arg(args, rd_kafka_t *);
-//    rd_kafka_destroy(rd_consumer);
-//    return 0;
-//}
 
 static rd_kafka_resp_err_t
 consumer_close(consumer_t *consumer) {
@@ -415,7 +392,7 @@ lua_consumer_gc(struct lua_State *L) {
 static int
 lua_create_consumer(struct lua_State *L) {
     if (lua_gettop(L) != 1 || !lua_istable(L, 1))
-        luaL_error(L, "Usage: create_consumer(conf)");
+        luaL_error(L, "Usage: consumer, err = create_consumer(conf)");
 
     lua_pushstring(L, "brokers");
     lua_gettable(L, -2 );
@@ -494,6 +471,321 @@ lua_create_consumer(struct lua_State *L) {
     return 1;
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/**
+ * Producer
+ */
+
+typedef struct {
+    rd_kafka_topic_t **elements;
+    int32_t count;
+    int32_t capacity;
+} producer_topics_t;
+
+static producer_topics_t *
+new_producer_topics(int32_t capacity) {
+    rd_kafka_topic_t **elements;
+    elements = malloc(sizeof(rd_kafka_topic_t *) * capacity);
+
+    producer_topics_t *topics;
+    topics = malloc(sizeof(producer_topics_t));
+    topics->capacity = capacity;
+    topics->count = 0;
+    topics->elements = elements;
+
+    return topics;
+}
+
+static int
+add_producer_topics(producer_topics_t *topics, rd_kafka_topic_t *element) {
+    if (topics->count >= topics->capacity) {
+        rd_kafka_topic_t **new_elements = realloc(topics->elements, sizeof(rd_kafka_topic_t *) * topics->capacity * 2);
+        if (new_elements == NULL) {
+            printf("realloc failed to relloc rd_kafka_topic_t array.");
+            return 1;
+        }
+        topics->elements = new_elements;
+        topics->capacity *= 2;
+    }
+    topics->count++;
+    *(topics->elements + topics->count) = element;
+    return 0;
+}
+
+static rd_kafka_topic_t *
+find_producer_topic_by_name(producer_topics_t *topics, const char *name) {
+    rd_kafka_topic_t **topic_p;
+    rd_kafka_topic_t **end = topics->elements + topics->count;
+    for (topic_p = topics->elements; topic_p < end; topic_p++) {
+        if (strcmp(rd_kafka_topic_name(*topic_p), name) == 0) {
+            return *topic_p;
+        }
+    }
+    return NULL;
+}
+
+static void
+destroy_producer_topics(producer_topics_t *topics) {
+    rd_kafka_topic_t **topic_p;
+    rd_kafka_topic_t **end = topics->elements + topics->count;
+    for (topic_p = topics->elements; topic_p < end; topic_p++) {
+        rd_kafka_topic_destroy(*topic_p);
+    }
+
+    free(topics->elements);
+    free(topics);
+}
+
+typedef struct {
+    rd_kafka_conf_t *rd_config;
+    rd_kafka_t *rd_producer;
+    producer_topics_t *topics;
+} producer_t;
+
+static inline producer_t *
+lua_check_producer(struct lua_State *L, int index) {
+    producer_t **producer_p = (producer_t **)luaL_checkudata(L, index, producer_label);
+    if (producer_p == NULL || *producer_p == NULL)
+        luaL_error(L, "Kafka consumer fatal error: failed to retrieve producer from lua stack!");
+    return *producer_p;
+}
+
+static int
+lua_producer_tostring(struct lua_State *L) {
+    producer_t *producer = lua_check_producer(L, 1);
+    lua_pushfstring(L, "Kafka Producer: %p", producer);
+    return 1;
+}
+
+static ssize_t
+producer_poll(va_list args) {
+    rd_kafka_t *rd_producer = va_arg(args, rd_kafka_t *);
+    rd_kafka_poll(rd_producer, 1000);
+    return 0;
+}
+
+static int
+lua_producer_poll(struct lua_State *L) {
+    if (lua_gettop(L) != 1)
+        luaL_error(L, "Usage: err = producer:poll()");
+
+    producer_t *producer = lua_check_producer(L, 1);
+    if (coio_call(producer_poll, producer->rd_producer) == -1) {
+        lua_pushstring(L, "unexpected error on producer poll");
+        return 1;
+    }
+    return 0;
+}
+
+static int
+lua_producer_produce(struct lua_State *L) {
+    if (lua_gettop(L) != 2 || !lua_istable(L, 2))
+        luaL_error(L, "Usage: err = producer:produce(msg)");
+
+    lua_pushstring(L, "topic");
+    lua_gettable(L, -2 );
+    const char *topic = lua_tostring(L, -1);
+    lua_pop(L, 1);
+    if (topic == NULL) {
+        int fail = safe_pushstring(L, "producer message must contains non nil 'topic' key");
+        return fail ? lua_push_error(L): 1;
+    }
+
+    lua_pushstring(L, "key");
+    lua_gettable(L, -2 );
+    // rd_kafka will copy key so no need to worry about this cast
+    char *key = (char *)lua_tostring(L, -1);
+    lua_pop(L, 1);
+
+    size_t key_len = key != NULL ? strlen(key) : 0;
+
+    lua_pushstring(L, "value");
+    lua_gettable(L, -2 );
+    // rd_kafka will copy value so no need to worry about this cast
+    char *value = (char *)lua_tostring(L, -1);
+    lua_pop(L, 1);
+
+    size_t value_len = value != NULL ? strlen(value) : 0;
+
+    if (key == NULL && value == NULL) {
+        lua_pushnil(L);
+        int fail = safe_pushstring(L, "producer message must contains non nil key or value");
+        return fail ? lua_push_error(L): 2;
+    }
+
+    producer_t *producer = lua_check_producer(L, 1);
+    rd_kafka_topic_t *rd_topic = find_producer_topic_by_name(producer->topics, topic);
+    if (rd_topic == NULL) {
+        rd_topic = rd_kafka_topic_new(producer->rd_producer, topic, NULL);
+        if (rd_topic == NULL) {
+            const char *const_err_str = rd_kafka_err2str(rd_kafka_errno2err(errno));
+            char err_str[512];
+            strcpy(err_str, const_err_str);
+            int fail = safe_pushstring(L, err_str);
+            return fail ? lua_push_error(L): 1;
+        }
+        if (add_producer_topics(producer->topics, rd_topic) != 0) {
+            int fail = safe_pushstring(L, "Unexpected error: failed to add new topic to topic list!");
+            return fail ? lua_push_error(L): 1;
+        }
+    }
+
+    if (rd_kafka_produce(rd_topic, -1, RD_KAFKA_MSG_F_COPY, value, value_len, key, key_len, NULL) == -1) {
+        const char *const_err_str = rd_kafka_err2str(rd_kafka_errno2err(errno));
+        char err_str[512];
+        strcpy(err_str, const_err_str);
+        int fail = safe_pushstring(L, err_str);
+        return fail ? lua_push_error(L): 1;
+    }
+    return 0;
+}
+
+static rd_kafka_resp_err_t
+producer_close(producer_t *producer) {
+    rd_kafka_resp_err_t err = RD_KAFKA_RESP_ERR_NO_ERROR;
+
+    if (producer->rd_producer != NULL) {
+        err = rd_kafka_flush(producer->rd_producer, 1000);
+        if (err) {
+            return err;
+        }
+    }
+
+    if (producer->topics != NULL) {
+        destroy_producer_topics(producer->topics);
+    }
+
+    if (producer->rd_producer != NULL) {
+        /* Destroy handle */
+        if (coio_call(kafka_destroy, producer->rd_producer) == -1) {
+            printf( "got error while running rd_kafka_destroy in coio_call" );
+        } else {
+            printf( "successfully done rd_kafka_destroy in coio_call" );
+        }
+
+        /* Let background threads clean up and terminate cleanly. */
+        rd_kafka_wait_destroyed(1000);
+    }
+
+    free(producer);
+
+    return err;
+}
+
+static int
+lua_producer_close(struct lua_State *L) {
+    producer_t **producer_p = (producer_t **)luaL_checkudata(L, 1, producer_label);
+    if (producer_p == NULL || *producer_p == NULL) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+
+    rd_kafka_resp_err_t err = producer_close(*producer_p);
+    if (err) {
+        lua_pushboolean(L, 1);
+
+        const char *const_err_str = rd_kafka_err2str(err);
+        char err_str[512];
+        strcpy(err_str, const_err_str);
+        int fail = safe_pushstring(L, err_str);
+        return fail ? lua_push_error(L): 2;
+    }
+
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+static int
+lua_producer_gc(struct lua_State *L) {
+    producer_t **producer_p = (producer_t **)luaL_checkudata(L, 1, producer_label);
+    if (producer_p && *producer_p) {
+        producer_close(*producer_p);
+    }
+    if (producer_p)
+        *producer_p = NULL;
+    return 0;
+}
+
+static int
+lua_create_producer(struct lua_State *L) {
+    if (lua_gettop(L) != 1 || !lua_istable(L, 1))
+        luaL_error(L, "Usage: producer, err = create_producer(conf)");
+
+    lua_pushstring(L, "brokers");
+    lua_gettable(L, -2 );
+    const char *brokers = lua_tostring(L, -1);
+    lua_pop(L, 1);
+    if (brokers == NULL) {
+        lua_pushnil(L);
+        int fail = safe_pushstring(L, "producer config table must have non nil key 'brokers' which contains string");
+        return fail ? lua_push_error(L): 2;
+    }
+
+    char errstr[512];
+
+    rd_kafka_conf_t *rd_config = rd_kafka_conf_new();
+
+    lua_pushstring(L, "options");
+    lua_gettable(L, -2 );
+    if (lua_istable(L, -1)) {
+        lua_pushnil(L);
+        // stack now contains: -1 => nil; -2 => table
+        while (lua_next(L, -2)) {
+            // stack now contains: -1 => value; -2 => key; -3 => table
+            if (!(lua_isstring(L, -1)) || !(lua_isstring(L, -2))) {
+                lua_pushnil(L);
+                int fail = safe_pushstring(L, "producer config options must contains only string keys and string values");
+                return fail ? lua_push_error(L): 2;
+            }
+
+            const char *value = lua_tostring(L, -1);
+            const char *key = lua_tostring(L, -2);
+            if (rd_kafka_conf_set(rd_config, key, value, errstr, sizeof(errstr))) {
+                lua_pushnil(L);
+                int fail = safe_pushstring(L, errstr);
+                return fail ? lua_push_error(L): 2;
+            }
+
+            // pop value, leaving original key
+            lua_pop(L, 1);
+            // stack now contains: -1 => key; -2 => table
+        }
+        // stack now contains: -1 => table
+    }
+    lua_pop(L, 1);
+
+    rd_kafka_t *rd_producer;
+    if (!(rd_producer = rd_kafka_new(RD_KAFKA_PRODUCER, rd_config, errstr, sizeof(errstr)))) {
+        lua_pushnil(L);
+        int fail = safe_pushstring(L, errstr);
+        return fail ? lua_push_error(L): 2;
+    }
+
+    if (rd_kafka_brokers_add(rd_producer, brokers) == 0) {
+        lua_pushnil(L);
+        int fail = safe_pushstring(L, "No valid brokers specified");
+        return fail ? lua_push_error(L): 2;
+    }
+
+    producer_t *producer;
+    producer = malloc(sizeof(producer_t));
+    producer->rd_config = rd_config;
+    producer->rd_producer = rd_producer;
+    producer->topics = new_producer_topics(256);
+
+    producer_t **producer_p = (producer_t **)lua_newuserdata(L, sizeof(producer));
+    *producer_p = producer;
+
+    luaL_getmetatable(L, producer_label);
+    lua_setmetatable(L, -2);
+    return 1;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/**
+ * Entry point
+ */
+
 LUA_API int
 luaopen_kafka_tntkafka(lua_State *L) {
     static const struct luaL_Reg consumer_methods [] = {
@@ -534,10 +826,27 @@ luaopen_kafka_tntkafka(lua_State *L) {
     lua_setfield(L, -2, "__metatable");
     lua_pop(L, 1);
 
+    static const struct luaL_Reg producer_methods [] = {
+            {"poll", lua_producer_poll},
+            {"produce", lua_producer_produce},
+            {"close", lua_producer_close},
+            {"__tostring", lua_producer_tostring},
+            {"__gc", lua_producer_gc},
+            {NULL, NULL}
+    };
+
+    luaL_newmetatable(L, producer_label);
+    lua_pushvalue(L, -1);
+    luaL_register(L, NULL, producer_methods);
+    lua_setfield(L, -2, "__index");
+    lua_pushstring(L, producer_label);
+    lua_setfield(L, -2, "__metatable");
+    lua_pop(L, 1);
+
 	lua_newtable(L);
 	static const struct luaL_Reg meta [] = {
         {"create_consumer", lua_create_consumer},
-//        {"create_producer", lua_create_producer},
+        {"create_producer", lua_create_producer},
         {NULL, NULL}
 	};
 	luaL_register(L, NULL, meta);
