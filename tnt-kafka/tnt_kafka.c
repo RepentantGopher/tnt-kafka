@@ -45,6 +45,7 @@ lua_push_error(struct lua_State *L)
 static ssize_t kafka_destroy(va_list args) {
     rd_kafka_t *kafka = va_arg(args, rd_kafka_t *);
     rd_kafka_destroy(kafka);
+    while (rd_kafka_wait_destroyed(1000) == -1) {}
     return 0;
 }
 
@@ -641,15 +642,24 @@ lua_producer_produce(struct lua_State *L) {
     return 0;
 }
 
+static ssize_t producer_flush(va_list args) {
+    rd_kafka_resp_err_t err = RD_KAFKA_RESP_ERR_NO_ERROR;
+    rd_kafka_t *rd_producer = va_arg(args, rd_kafka_t *);
+    while (true) {
+        err = rd_kafka_flush(rd_producer, 1000);
+        if (err != RD_KAFKA_RESP_ERR__TIMED_OUT) {
+            break;
+        }
+    }
+    return 0;
+}
+
 static rd_kafka_resp_err_t
 producer_close(producer_t *producer) {
     rd_kafka_resp_err_t err = RD_KAFKA_RESP_ERR_NO_ERROR;
 
     if (producer->rd_producer != NULL) {
-        err = rd_kafka_flush(producer->rd_producer, 1000);
-        if (err) {
-            return err;
-        }
+        coio_call(producer_flush, producer->rd_producer);
     }
 
     if (producer->topics != NULL) {
@@ -658,18 +668,10 @@ producer_close(producer_t *producer) {
 
     if (producer->rd_producer != NULL) {
         /* Destroy handle */
-        if (coio_call(kafka_destroy, producer->rd_producer) == -1) {
-            printf( "got error while running rd_kafka_destroy in coio_call" );
-        } else {
-            printf( "successfully done rd_kafka_destroy in coio_call" );
-        }
-
-        /* Let background threads clean up and terminate cleanly. */
-        rd_kafka_wait_destroyed(1000);
+        coio_call(kafka_destroy, producer->rd_producer);
     }
 
     free(producer);
-
     return err;
 }
 

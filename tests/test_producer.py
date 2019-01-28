@@ -48,15 +48,15 @@ def test_producer():
 
         assert kafka_output == [
             {
-                "key": None,
+                "key": "1",
                 "value": "1"
             },
             {
-                "key": None,
+                "key": "2",
                 "value": "2"
             },
             {
-                "key": None,
+                "key": "3",
                 "value": "3"
             },
         ]
