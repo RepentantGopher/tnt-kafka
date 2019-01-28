@@ -52,7 +52,7 @@ docker-read-topic-data:
       --net=${NETWORK} \
       --rm \
       confluentinc/cp-kafka:5.0.0 \
-      kafka-console-consumer --bootstrap-server kafka:9092 --topic test_consumer --from-beginning
+      kafka-console-consumer --bootstrap-server kafka:9092 --topic test_producer --from-beginning
 
 APP_NAME = kafka-test
 APP_IMAGE = kafka-test-image

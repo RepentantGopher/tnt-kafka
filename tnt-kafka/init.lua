@@ -1,11 +1,6 @@
 local log = require("log")
-local ffi = require('ffi')
 local fiber = require('fiber')
 local tnt_kafka = require("tnt-kafka.tntkafka")
-
-local ConsumerMessage = {}
-
-ConsumerMessage.__index = ConsumerMessage
 
 local Consumer = {}
 
@@ -94,6 +89,60 @@ function Consumer:store_offset(message)
     return self._consumer:store_offset(message)
 end
 
+local Producer = {}
+
+Producer.__index = Producer
+
+function Producer.create(config)
+    if config == nil then
+        return nil, "config must not be nil"
+    end
+
+    local producer, err = tnt_kafka.create_producer(config)
+    if err ~= nil then
+        return nil, err
+    end
+
+    local new = {
+        config = config,
+        _producer = producer,
+    }
+    setmetatable(new, Producer)
+
+    new._poll_fiber = fiber.create(function()
+        new:_poll()
+    end)
+
+    return new, nil
+end
+
+function Producer:_poll()
+    local err
+    while true do
+        err = self._producer:poll()
+        if err ~= nil then
+            log.error(err)
+        end
+    end
+end
+
+jit.off(Producer._poll)
+
+function Producer:produce_async(msg)
+    local err = self._producer:produce(msg)
+    return err
+end
+
+function Producer:close()
+    self._poll_fiber:cancel()
+
+    local ok, err = self._producer:close()
+    self._producer = nil
+
+    return err
+end
+
 return {
     Consumer = Consumer,
+    Producer = Producer,
 }

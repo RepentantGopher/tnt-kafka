@@ -507,18 +507,19 @@ add_producer_topics(producer_topics_t *topics, rd_kafka_topic_t *element) {
         topics->elements = new_elements;
         topics->capacity *= 2;
     }
-    topics->count++;
-    *(topics->elements + topics->count) = element;
+    topics->elements[topics->count++] = element;
     return 0;
 }
 
 static rd_kafka_topic_t *
 find_producer_topic_by_name(producer_topics_t *topics, const char *name) {
-    rd_kafka_topic_t **topic_p;
-    rd_kafka_topic_t **end = topics->elements + topics->count;
-    for (topic_p = topics->elements; topic_p < end; topic_p++) {
-        if (strcmp(rd_kafka_topic_name(*topic_p), name) == 0) {
-            return *topic_p;
+    rd_kafka_topic_t *topic;
+    for (int i = 0; i < topics->count; i++) {
+        topic = topics->elements[i];
+        if (strcmp(rd_kafka_topic_name(topic), name) == 0) {
+            return topic;
+        } else {
+            return topic;
         }
     }
     return NULL;

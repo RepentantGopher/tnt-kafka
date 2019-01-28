@@ -1,54 +1,32 @@
 local os = require('os')
+local box = require('box')
+local log = require('log')
 local fiber = require('fiber')
-local kafka_producer = require('tnt-kafka.producer')
+local tnt_kafka = require('tnt-kafka')
 
-local BROKERS_ADDRESS = { "kafka" }
 local TOPIC_NAME = "test_producer"
 
 return function(messages)
-    local config, err = kafka_producer.ProducerConfig.create(BROKERS_ADDRESS, true)
+    local producer, err = tnt_kafka.Producer.create({brokers = "kafka:9092", options = {}})
     if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-
-    config:set_option("statistics.interval.ms", "1000")
-    config:set_stat_cb(function (payload) print("Stat Callback '".. payload.. "'") end)
-
-    local producer, err = kafka_producer.Producer.create(config)
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-
-    local err = producer:start()
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-
-    local err = producer:add_topic(TOPIC_NAME, {})
-    if err ~= nil then
-        print(err)
-        os.exit(1)
+        log.error("got err %s", err)
+        box.error{code = 500, reason = err}
     end
 
     for _, message in ipairs(messages) do
-        fiber.create(function()
-            local err = producer:produce({topic = TOPIC_NAME, value = message})
-            if err ~= nil then
-                print(string.format("got error '%s' while sending value '%s'", err, message))
-            else
-                print(string.format("successfully sent value '%s'", message))
-            end
-        end)
+        local err = producer:produce_async({topic = TOPIC_NAME, value = message})
+        if err ~= nil then
+            log.error("got error '%s' while sending value '%s'", err, message)
+        else
+            log.error("successfully sent value '%s'", message)
+        end
     end
 
-    fiber.sleep(2)
+--    fiber.sleep(2)
 
-    local err = producer:stop()
+    local err = producer:close()
     if err ~= nil then
-        print(err)
-        os.exit(1)
+        log.error("got err %s", err)
+        box.error{code = 500, reason = err}
     end
 end
