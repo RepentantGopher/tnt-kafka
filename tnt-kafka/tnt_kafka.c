@@ -3,6 +3,8 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdarg.h>
+#include <pthread.h>
+#include <unistd.h>
 
 #include <errno.h>
 #include <lua.h>
@@ -12,6 +14,15 @@
 #include <tarantool/module.h>
 
 #include <librdkafka/rdkafka.h>
+
+#ifdef UNUSED
+#elif defined(__GNUC__)
+# define UNUSED(x) UNUSED_ ## x __attribute__((unused))
+#elif defined(__LCLINT__)
+# define UNUSED(x) /*@unused@*/ x
+#else
+# define UNUSED(x) x
+#endif
 
 static const char consumer_label[] = "__tnt_kafka_consumer";
 static const char consumer_msg_label[] = "__tnt_kafka_consumer_msg";
@@ -42,12 +53,18 @@ lua_push_error(struct lua_State *L)
     return 2;
 }
 
-static ssize_t kafka_destroy(va_list args) {
-    rd_kafka_t *kafka = va_arg(args, rd_kafka_t *);
-    rd_kafka_destroy(kafka);
-    while (rd_kafka_wait_destroyed(1000) == -1) {}
-    return 0;
-}
+// FIXME: suppress warning
+//static ssize_t
+//kafka_destroy(va_list args) {
+//    rd_kafka_t *kafka = va_arg(args, rd_kafka_t *);
+//
+//    // waiting in background while garbage collector collects all refs
+//    sleep(5);
+//
+//    rd_kafka_destroy(kafka);
+//    while (rd_kafka_wait_destroyed(1000) == -1) {}
+//    return 0;
+//}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /**
@@ -174,7 +191,6 @@ lua_consumer_msg_gc(struct lua_State *L) {
  */
 
 typedef struct {
-    rd_kafka_conf_t *rd_config;
     rd_kafka_t *rd_consumer;
     rd_kafka_topic_partition_list_t *topics;
     rd_kafka_queue_t *rd_event_queue;
@@ -315,15 +331,15 @@ static rd_kafka_resp_err_t
 consumer_close(consumer_t *consumer) {
     rd_kafka_resp_err_t err = RD_KAFKA_RESP_ERR_NO_ERROR;
 
-    if (consumer->rd_msg_queue != NULL) {
-        rd_kafka_queue_destroy(consumer->rd_msg_queue);
-    }
-
     if (consumer->rd_consumer != NULL) {
         err = rd_kafka_consumer_close(consumer->rd_consumer);
         if (err) {
             return err;
         }
+    }
+
+    if (consumer->rd_msg_queue != NULL) {
+        rd_kafka_queue_destroy(consumer->rd_msg_queue);
     }
 
     if (consumer->rd_event_queue != NULL) {
@@ -334,21 +350,10 @@ consumer_close(consumer_t *consumer) {
         rd_kafka_topic_partition_list_destroy(consumer->topics);
     }
 
-    if (consumer->rd_config != NULL) {
-//        rd_kafka_conf_destroy(consumer->rd_config);
-    }
-
     if (consumer->rd_consumer != NULL) {
-        // FIXME: rd_kafka_destroy hangs forever cause of undestroyed messages
         /* Destroy handle */
-//        if (coio_call(kafka_destroy, consumer->rd_consumer) == -1) {
-//            printf( "got error while running rd_kafka_destroy in coio_call" );
-//        } else {
-//            printf( "successfully done rd_kafka_destroy in coio_call" );
-//        }
-
-        /* Let background threads clean up and terminate cleanly. */
-//        rd_kafka_wait_destroyed(1000);
+        // FIXME: kafka_destroy hangs forever
+//        coio_call(kafka_destroy, consumer->rd_consumer);
     }
 
     free(consumer);
@@ -458,7 +463,6 @@ lua_create_consumer(struct lua_State *L) {
 
     consumer_t *consumer;
     consumer = malloc(sizeof(consumer_t));
-    consumer->rd_config = rd_config;
     consumer->rd_consumer = rd_consumer;
     consumer->topics = NULL;
     consumer->rd_event_queue = rd_event_queue;
@@ -538,10 +542,128 @@ destroy_producer_topics(producer_topics_t *topics) {
     free(topics);
 }
 
+// Cause `rd_kafka_conf_set_events(rd_config, RD_KAFKA_EVENT_DR)` produces segfault with queue api, we are forced to
+// implement our own thread safe queue to push incoming events from callback thread to lua thread.
+typedef struct {
+    double id;
+    const char *err;
+} queue_element_t;
+
+queue_element_t *
+new_queue_element(double id, const char *err) {
+    queue_element_t *element;
+    element = malloc(sizeof(queue_element_t));
+    element->id = id;
+    element->err = err;
+    return element;
+}
+
+void
+destroy_queue_element(queue_element_t *element) {
+    free(element);
+}
+
+typedef struct queue_node_t {
+    queue_element_t *element;
+    struct queue_node_t *next;
+} queue_node_t;
+
+typedef struct {
+    pthread_mutex_t lock;
+    queue_node_t *head;
+    queue_node_t *tail;
+} queue_t;
+
+static queue_element_t *
+queue_pop(queue_t *queue) {
+    queue_element_t *output = NULL;
+
+    pthread_mutex_lock(&queue->lock);
+
+    if (queue->head != NULL) {
+        output = queue->head->element;
+        queue_node_t *tmp = queue->head;
+        queue->head = queue->head->next;
+        free(tmp);
+        if (queue->head == NULL) {
+            queue->tail = NULL;
+        }
+    }
+
+    pthread_mutex_unlock(&queue->lock);
+
+    return output;
+}
+
+static int
+queue_push(queue_t *queue, queue_element_t *element) {
+    if (element == NULL || queue == NULL) {
+        return -1;
+    }
+
+    pthread_mutex_lock(&queue->lock);
+
+    queue_node_t *new_node;
+    new_node = malloc(sizeof(queue_node_t));
+    if (new_node == NULL) {
+        return -1;
+    }
+
+    new_node->element = element;
+    new_node->next = NULL;
+
+    if (queue->tail != NULL) {
+        queue->tail->next = new_node;
+    }
+
+    queue->tail = new_node;
+    if (queue->head == NULL) {
+        queue->head = new_node;
+    }
+
+    pthread_mutex_unlock(&queue->lock);
+
+    return 0;
+}
+
+static queue_t *
+new_queue() {
+    queue_t *queue = malloc(sizeof(queue_t));
+    if (queue == NULL) {
+        return NULL;
+    }
+
+    pthread_mutex_t lock;
+    if (pthread_mutex_init(&lock, NULL) != 0) {
+        return NULL;
+    }
+
+    queue->lock = lock;
+    queue->head = NULL;
+    queue->tail = NULL;
+
+    return queue;
+}
+
+void
+destroy_queue(queue_t *queue) {
+    while (true) {
+        queue_element_t *element = queue_pop(queue);
+        if (element == NULL) {
+            break;
+        }
+        destroy_queue_element(element);
+    }
+
+    pthread_mutex_destroy(&queue->lock);
+    free(queue);
+}
+
 typedef struct {
     rd_kafka_conf_t *rd_config;
     rd_kafka_t *rd_producer;
     producer_topics_t *topics;
+    queue_t *delivery_queue;
 } producer_t;
 
 static inline producer_t *
@@ -575,6 +697,27 @@ lua_producer_poll(struct lua_State *L) {
     if (coio_call(producer_poll, producer->rd_producer) == -1) {
         lua_pushstring(L, "unexpected error on producer poll");
         return 1;
+    }
+    return 0;
+}
+
+static int
+lua_producer_msg_delivery_poll(struct lua_State *L) {
+    if (lua_gettop(L) != 1)
+        luaL_error(L, "Usage: id, err = producer:msg_delivery_poll()");
+
+    producer_t *producer = lua_check_producer(L, 1);
+
+    queue_element_t *element = queue_pop(producer->delivery_queue);
+    if (element != NULL) {
+        lua_pushnumber(L, element->id);
+        if (element->err != NULL) {
+            lua_pushstring(L, element->err);
+        } else {
+            lua_pushnil(L);
+        }
+        destroy_queue_element(element);
+        return 2;
     }
     return 0;
 }
@@ -615,6 +758,22 @@ lua_producer_produce(struct lua_State *L) {
         return fail ? lua_push_error(L): 2;
     }
 
+    // create delivery callback queue if got msg id
+    queue_element_t *element;
+    lua_pushstring(L, "id");
+    lua_gettable(L, -2 );
+    if (lua_isnumber(L, -1)) {
+        element = new_queue_element(lua_tonumber(L, -1), NULL);
+        if (element == NULL) {
+            lua_pushnil(L);
+            int fail = safe_pushstring(L, "failed to create callback message");
+            return fail ? lua_push_error(L): 2;
+        }
+    } else {
+        lua_pop(L, 1);
+    }
+    lua_pop(L, 1);
+
     producer_t *producer = lua_check_producer(L, 1);
     rd_kafka_topic_t *rd_topic = find_producer_topic_by_name(producer->topics, topic);
     if (rd_topic == NULL) {
@@ -632,7 +791,7 @@ lua_producer_produce(struct lua_State *L) {
         }
     }
 
-    if (rd_kafka_produce(rd_topic, -1, RD_KAFKA_MSG_F_COPY, value, value_len, key, key_len, NULL) == -1) {
+    if (rd_kafka_produce(rd_topic, -1, RD_KAFKA_MSG_F_COPY, value, value_len, key, key_len, element) == -1) {
         const char *const_err_str = rd_kafka_err2str(rd_kafka_errno2err(errno));
         char err_str[512];
         strcpy(err_str, const_err_str);
@@ -666,9 +825,14 @@ producer_close(producer_t *producer) {
         destroy_producer_topics(producer->topics);
     }
 
+    if (producer->delivery_queue != NULL) {
+        destroy_queue(producer->delivery_queue);
+    }
+
     if (producer->rd_producer != NULL) {
+        // FIXME: if instance of consumer exists then kafka_destroy always hangs forever
         /* Destroy handle */
-        coio_call(kafka_destroy, producer->rd_producer);
+//        coio_call(kafka_destroy, producer->rd_producer);
     }
 
     free(producer);
@@ -709,6 +873,18 @@ lua_producer_gc(struct lua_State *L) {
     return 0;
 }
 
+void
+msg_delivery_callback(rd_kafka_t *UNUSED(producer), const rd_kafka_message_t *msg, void *opaque) {
+    queue_element_t *element = msg->_private;
+    queue_t *queue = opaque;
+    if (element != NULL) {
+        if (msg->err) {
+            element->err = rd_kafka_err2str(msg->err);
+        }
+        queue_push(queue, element);
+    }
+}
+
 static int
 lua_create_producer(struct lua_State *L) {
     if (lua_gettop(L) != 1 || !lua_istable(L, 1))
@@ -727,6 +903,15 @@ lua_create_producer(struct lua_State *L) {
     char errstr[512];
 
     rd_kafka_conf_t *rd_config = rd_kafka_conf_new();
+
+    queue_t *delivery_queue = new_queue();
+    // queue now accessible from callback
+    rd_kafka_conf_set_opaque(rd_config, delivery_queue);
+
+    rd_kafka_conf_set_dr_msg_cb(rd_config, msg_delivery_callback);
+
+    // enabling delivering events
+//    rd_kafka_conf_set_events(rd_config, RD_KAFKA_EVENT_STATS | RD_KAFKA_EVENT_DR);
 
     lua_pushstring(L, "options");
     lua_gettable(L, -2 );
@@ -775,6 +960,7 @@ lua_create_producer(struct lua_State *L) {
     producer->rd_config = rd_config;
     producer->rd_producer = rd_producer;
     producer->topics = new_producer_topics(256);
+    producer->delivery_queue = delivery_queue;
 
     producer_t **producer_p = (producer_t **)lua_newuserdata(L, sizeof(producer));
     *producer_p = producer;
@@ -832,6 +1018,7 @@ luaopen_kafka_tntkafka(lua_State *L) {
     static const struct luaL_Reg producer_methods [] = {
             {"poll", lua_producer_poll},
             {"produce", lua_producer_produce},
+            {"msg_delivery_poll", lua_producer_msg_delivery_poll},
             {"close", lua_producer_close},
             {"__tostring", lua_producer_tostring},
             {"__gc", lua_producer_gc},

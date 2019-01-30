@@ -10,14 +10,6 @@ local TOPIC_NAME = "test_consumer"
 local function consume()
     log.info("consume called")
 
---    local config, err = kafka_consumer.ConsumerConfig.create(BROKERS_ADDRESS, "test_consumer6", false, {["auto.offset.reset"] = "earliest"})
---    if err ~= nil then
---        print(err)
---        os.exit(1)
---    end
-
---    config:set_option("check.crcs", "true")
-
     local consumer, err = tnt_kafka.Consumer.create({brokers = "kafka:9092", options = {
         ["enable.auto.offset.store"] = "false",
         ["group.id"] = "test_consumer",
@@ -43,7 +35,7 @@ local function consume()
     fiber.create(function()
         local out = consumer:output()
         while true do
-            if out == nil then
+            if out:is_closed() then
                 break
             end
 

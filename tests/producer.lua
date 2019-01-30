@@ -14,15 +14,13 @@ return function(messages)
     end
 
     for _, message in ipairs(messages) do
-        local err = producer:produce_async({topic = TOPIC_NAME, key = message, value = message})
+        local err = producer:produce({topic = TOPIC_NAME, key = message, value = message})
         if err ~= nil then
             log.error("got error '%s' while sending value '%s'", err, message)
         else
             log.error("successfully sent value '%s'", message)
         end
     end
-
---    fiber.sleep(2)
 
     local err = producer:close()
     if err ~= nil then

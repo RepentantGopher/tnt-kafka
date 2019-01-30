@@ -105,12 +105,18 @@ function Producer.create(config)
 
     local new = {
         config = config,
+        _counter = 0,
+        _delivery_map = {},
         _producer = producer,
     }
     setmetatable(new, Producer)
 
     new._poll_fiber = fiber.create(function()
         new:_poll()
+    end)
+
+    new._msg_delivery_poll_fiber = fiber.create(function()
+        new:_msg_delivery_poll()
     end)
 
     return new, nil
@@ -128,13 +134,51 @@ end
 
 jit.off(Producer._poll)
 
+function Producer:_msg_delivery_poll()
+    local id, err, delivery_chan
+    while true do
+        id, err = self._producer:msg_delivery_poll()
+        if id ~= nil then
+            delivery_chan = self._delivery_map[id]
+            if delivery_chan ~= nil then
+                delivery_chan:put(err)
+            else
+                log.error("Kafka Consumer: delivery channel with id = '%d' not found", id)
+            end
+            fiber.yield()
+        else
+            -- throtling poll
+            fiber.sleep(0.01)
+        end
+    end
+end
+
+jit.off(Producer._msg_delivery_poll)
+
 function Producer:produce_async(msg)
     local err = self._producer:produce(msg)
     return err
 end
 
+function Producer:produce(msg)
+    self._counter = self._counter + 1
+    local id = self._counter
+    local delivery_chan = fiber.channel(1)
+    self._delivery_map[id] = delivery_chan
+
+    msg.id = id
+    local err = self._producer:produce(msg)
+    if err == nil then
+        err = delivery_chan:get()
+    end
+
+    self._delivery_map[id] = nil
+    return err
+end
+
 function Producer:close()
     self._poll_fiber:cancel()
+    self._msg_delivery_poll_fiber:cancel()
 
     local ok, err = self._producer:close()
     self._producer = nil
