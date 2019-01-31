@@ -524,8 +524,6 @@ find_producer_topic_by_name(producer_topics_t *topics, const char *name) {
         topic = topics->elements[i];
         if (strcmp(rd_kafka_topic_name(topic), name) == 0) {
             return topic;
-        } else {
-            return topic;
         }
     }
     return NULL;
