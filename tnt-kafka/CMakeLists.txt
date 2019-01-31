@@ -8,5 +8,5 @@ endif(APPLE)
 target_link_libraries(tntkafka ${RDKAFKA_LIBRARY} pthread)
 
 set_target_properties(tntkafka PROPERTIES PREFIX "" OUTPUT_NAME "tntkafka")
-install(TARGETS tntkafka LIBRARY DESTINATION ${TARANTOOL_INSTALL_LIBDIR}/tntkafka)
-install(FILES init.lua DESTINATION ${TARANTOOL_INSTALL_LUADIR}/tntkafka)
+install(TARGETS tntkafka LIBRARY DESTINATION ${TARANTOOL_INSTALL_LIBDIR}/tnt-kafka)
+install(FILES init.lua DESTINATION ${TARANTOOL_INSTALL_LUADIR}/tnt-kafka)
