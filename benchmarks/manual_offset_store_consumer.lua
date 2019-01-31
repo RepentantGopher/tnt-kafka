@@ -50,7 +50,7 @@ end
 
 local function consume()
     local consumer, err = tnt_kafka.Consumer.create({ brokers = "kafka:9092", options = {
-        ["enable.auto.offset.store"] = "true",
+        ["enable.auto.offset.store"] = "false",
         ["group.id"] = "test_consumer1",
         ["auto.offset.reset"] = "earliest",
         ["enable.partition.eof"] = "false",

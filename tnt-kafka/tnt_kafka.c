@@ -760,9 +760,8 @@ lua_producer_produce(struct lua_State *L) {
     size_t value_len = value != NULL ? strlen(value) : 0;
 
     if (key == NULL && value == NULL) {
-        lua_pushnil(L);
         int fail = safe_pushstring(L, "producer message must contains non nil key or value");
-        return fail ? lua_push_error(L): 2;
+        return fail ? lua_push_error(L): 1;
     }
 
     // create delivery callback queue if got msg id
@@ -772,9 +771,8 @@ lua_producer_produce(struct lua_State *L) {
     if (lua_isnumber(L, -1)) {
         element = new_queue_element(lua_tonumber(L, -1), RD_KAFKA_RESP_ERR_NO_ERROR);
         if (element == NULL) {
-            lua_pushnil(L);
             int fail = safe_pushstring(L, "failed to create callback message");
-            return fail ? lua_push_error(L): 2;
+            return fail ? lua_push_error(L): 1;
         }
     } else {
         lua_pop(L, 1);
