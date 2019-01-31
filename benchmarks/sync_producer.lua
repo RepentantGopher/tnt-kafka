@@ -3,10 +3,10 @@ local box = require('box')
 local log = require('log')
 local os = require('os')
 local clock = require('clock')
-local kafka_producer = require('tnt-kafka.producer')
+local tnt_kafka = require('tnt-kafka')
 
 box.cfg{
-    memtx_memory = 524288000,
+    memtx_memory = 524288000, -- 500 MB
 }
 
 box.once('init', function()
@@ -14,57 +14,50 @@ box.once('init', function()
 end)
 
 local function produce()
-    local config, err = kafka_producer.ProducerConfig.create(
-        {"kafka:9092"}, -- -- array of brokers
-        true -- sync_producer
-    )
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-
-    local producer, err = kafka_producer.Producer.create(config)
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-
-    local err = producer:start()
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-
-    local err = producer:add_topic("sync_producer_benchmark", {}) -- add topic with configuration
+    local producer, err = tnt_kafka.Producer.create({brokers = "kafka:9092"})
     if err ~= nil then
         print(err)
         os.exit(1)
     end
 
     local before = clock.monotonic64()
-    for i = 1, 10000000 do
+    local input_ch = fiber.channel();
+    for i = 1, 120000 do
         fiber.create(function()
-            local value = "test_value_" .. tostring(i)
             while true do
-                local err = producer:produce({
-                    topic = "sync_producer_benchmark",
-                    value = value -- only strings allowed
-                })
-                if err ~= nil then
-                    print(err)
-                    fiber.sleep(0.1)
-                else
+                if input_ch:is_closed() then
                     break
+                end
+                local value = input_ch:get()
+                if value ~= nil then
+                    while true do
+                        local err = producer:produce({
+                            topic = "sync_producer_benchmark",
+                            value = value -- only strings allowed
+                        })
+                        if err ~= nil then
+                            --                    print(err)
+                            fiber.sleep(0.1)
+                        else
+                            if value % 10000 == 0 then
+                                log.info("done %d", value)
+                            end
+                            break
+                        end
+                    end
                 end
             end
         end)
-        if i % 1000 == 0 then
-            fiber.yield()
-        end
     end
 
+    for i = 1, 10000000 do
+        input_ch:put(i)
+    end
+
+    input_ch:close()
+
     log.info("stopping")
-    local err = producer:stop() -- always stop consumer to send all pending messages before app close
+    local ok, err = producer:close() -- always stop consumer to send all pending messages before app close
     if err ~= nil then
         print(err)
         os.exit(1)
@@ -75,4 +68,5 @@ local function produce()
 end
 
 log.info("starting benchmark")
+
 produce()

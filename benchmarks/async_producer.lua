@@ -3,7 +3,7 @@ local box = require('box')
 local os = require('os')
 local log = require('log')
 local clock = require('clock')
-local kafka_producer = require('tnt-kafka.producer')
+local tnt_kafka = require('tnt-kafka')
 
 box.cfg{}
 
@@ -12,28 +12,7 @@ box.once('init', function()
 end)
 
 local function produce()
-    local config, err = kafka_producer.ProducerConfig.create(
-        {"kafka:9092"}, -- -- array of brokers
-        false -- sync_producer
-    )
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-
-    local producer, err = kafka_producer.Producer.create(config)
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-
-    local err = producer:start()
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-
-    local err = producer:add_topic("async_producer_benchmark", {}) -- add topic with configuration
+    local producer, err = tnt_kafka.Producer.create({brokers = "kafka:9092", options = {}})
     if err ~= nil then
         print(err)
         os.exit(1)
@@ -47,18 +26,20 @@ local function produce()
                 value = "test_value_" .. tostring(i) -- only strings allowed
             })
             if err ~= nil then
-                print(err)
+--                print(err)
+                fiber.sleep(0.1)
             else
                 break
             end
         end
         if i % 1000 == 0 then
+--            log.info("done %d", i)
             fiber.yield()
         end
     end
 
     log.info("stopping")
-    local err = producer:stop() -- always stop consumer to send all pending messages before app close
+    local ok, err = producer:close() -- always stop consumer to send all pending messages before app close
     if err ~= nil then
         print(err)
         os.exit(1)
@@ -69,4 +50,5 @@ local function produce()
 end
 
 log.info("starting benchmark")
+
 produce()

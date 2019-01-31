@@ -12,8 +12,4 @@ RUN cmake .
 
 RUN make
 
-RUN ls -l .
-
-RUN ls -l ./tnt-kafka
-
 ENTRYPOINT tarantool /opt/tarantool/tests/app.lua

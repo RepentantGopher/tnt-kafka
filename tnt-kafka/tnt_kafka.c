@@ -380,6 +380,7 @@ lua_consumer_close(struct lua_State *L) {
         return fail ? lua_push_error(L): 2;
     }
 
+    *consumer_p = NULL;
     lua_pushboolean(L, 1);
     return 1;
 }
@@ -546,11 +547,11 @@ destroy_producer_topics(producer_topics_t *topics) {
 // implement our own thread safe queue to push incoming events from callback thread to lua thread.
 typedef struct {
     double id;
-    const char *err;
+    int err;
 } queue_element_t;
 
 queue_element_t *
-new_queue_element(double id, const char *err) {
+new_queue_element(double id, int err) {
     queue_element_t *element;
     element = malloc(sizeof(queue_element_t));
     element->id = id;
@@ -711,8 +712,14 @@ lua_producer_msg_delivery_poll(struct lua_State *L) {
     queue_element_t *element = queue_pop(producer->delivery_queue);
     if (element != NULL) {
         lua_pushnumber(L, element->id);
-        if (element->err != NULL) {
-            lua_pushstring(L, element->err);
+        if (element->err != RD_KAFKA_RESP_ERR_NO_ERROR) {
+            const char *const_err_str = rd_kafka_err2str(element->err);
+            char err_str[512];
+            strcpy(err_str, const_err_str);
+            int fail = safe_pushstring(L, err_str);
+            if (fail) {
+                return lua_push_error(L);
+            }
         } else {
             lua_pushnil(L);
         }
@@ -759,11 +766,11 @@ lua_producer_produce(struct lua_State *L) {
     }
 
     // create delivery callback queue if got msg id
-    queue_element_t *element;
+    queue_element_t *element = NULL;
     lua_pushstring(L, "id");
     lua_gettable(L, -2 );
     if (lua_isnumber(L, -1)) {
-        element = new_queue_element(lua_tonumber(L, -1), NULL);
+        element = new_queue_element(lua_tonumber(L, -1), RD_KAFKA_RESP_ERR_NO_ERROR);
         if (element == NULL) {
             lua_pushnil(L);
             int fail = safe_pushstring(L, "failed to create callback message");
@@ -858,6 +865,7 @@ lua_producer_close(struct lua_State *L) {
         return fail ? lua_push_error(L): 2;
     }
 
+    *producer_p = NULL;
     lua_pushboolean(L, 1);
     return 1;
 }
@@ -875,13 +883,15 @@ lua_producer_gc(struct lua_State *L) {
 
 void
 msg_delivery_callback(rd_kafka_t *UNUSED(producer), const rd_kafka_message_t *msg, void *opaque) {
-    queue_element_t *element = msg->_private;
-    queue_t *queue = opaque;
-    if (element != NULL) {
-        if (msg->err) {
-            element->err = rd_kafka_err2str(msg->err);
+    if (msg->_private != NULL) {
+        queue_element_t *element = msg->_private;
+        queue_t *queue = opaque;
+        if (element != NULL) {
+            if (msg->err != RD_KAFKA_RESP_ERR_NO_ERROR) {
+                element->err = msg->err;
+            }
+            queue_push(queue, element);
         }
-        queue_push(queue, element);
     }
 }
 

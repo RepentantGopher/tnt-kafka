@@ -1,11 +1,13 @@
 local fiber = require('fiber')
+local log = require('log')
 local box = require('box')
 local os = require('os')
 local clock = require('clock')
-local kafka_consumer = require('tnt-kafka.consumer')
-local kafka_producer = require('tnt-kafka.producer')
+local tnt_kafka = require('tnt-kafka')
 
-box.cfg{}
+box.cfg{
+    memtx_memory = 524288000, -- 500 MB
+}
 
 local TOPIC = "auto_offset_store_consumer_benchmark"
 local MSG_COUNT = 10000000
@@ -15,28 +17,7 @@ box.once('init', function()
 end)
 
 local function produce_initial_data()
-    local config, err = kafka_producer.ProducerConfig.create(
-        {"kafka:9092"},
-        false
-    )
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-
-    local producer, err = kafka_producer.Producer.create(config)
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-
-    local err = producer:start()
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-
-    local err = producer:add_topic(TOPIC, {}) -- add topic with configuration
+    local producer, err = tnt_kafka.Producer.create({ brokers = "kafka:9092"})
     if err ~= nil then
         print(err)
         os.exit(1)
@@ -49,7 +30,8 @@ local function produce_initial_data()
                 value = "test_value_" .. tostring(i) -- only strings allowed
             })
             if err ~= nil then
-                print(err)
+--                print(err)
+                fiber.sleep(0.1)
             else
                 break
             end
@@ -59,7 +41,7 @@ local function produce_initial_data()
         end
     end
 
-    local err = producer:stop() -- always stop consumer to send all pending messages before app close
+    local ok, err = producer:close() -- always stop consumer to send all pending messages before app close
     if err ~= nil then
         print(err)
         os.exit(1)
@@ -67,32 +49,19 @@ local function produce_initial_data()
 end
 
 local function consume()
-    local config, err = kafka_consumer.ConsumerConfig.create(
-        {"kafka:9092"}, -- array of brokers
-        "test_consumer", -- consumer group
-        true, -- enable auto offset storage
-        {["auto.offset.reset"] = "earliest"} -- default configuration for topics
-    )
+    local consumer, err = tnt_kafka.Consumer.create({ brokers = "kafka:9092", options = {
+        ["enable.auto.offset.store"] = "true",
+        ["group.id"] = "test_consumer1",
+        ["auto.offset.reset"] = "earliest",
+        ["enable.partition.eof"] = "false",
+        ["queued.min.messages"] = "100000"
+    }})
     if err ~= nil then
         print(err)
         os.exit(1)
     end
 
-    config:set_option("queued.min.messages", "100000") -- set global consumer option
-
-    local consumer, err = kafka_consumer.Consumer.create(config)
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-
-    local err = consumer:start()
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-
-    local err = consumer:subscribe({TOPIC}) -- array of topics to subscribe
+    local err = consumer:subscribe({TOPIC})
     if err ~= nil then
         print(err)
         os.exit(1)
@@ -116,10 +85,14 @@ local function consume()
             counter = counter + 1
 --            print(msg:value())
         end
+        if counter % 10000 == 0 then
+            log.info("done %d", counter)
+            fiber.yield()
+        end
     end
 
     print("closing")
-    local err = consumer:stop()
+    local ok, err = consumer:close()
     if err ~= nil then
         print(err)
         os.exit(1)

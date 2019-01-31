@@ -297,7 +297,7 @@ because `rd_kafka_destroy` sometimes hangs forever.
 
 ### Async
 
-Result: over 80000 produced messages per second on macbook pro 2016
+Result: over 150000 produced messages per second on macbook pro 2016
 
 Local run in docker:
 ```bash
@@ -308,7 +308,7 @@ Local run in docker:
 
 ### Sync
 
-Result: over 50000 produced messages per second on macbook pro 2016
+Result: over 60000 produced messages per second on macbook pro 2016
 
 Local run in docker:
 ```bash
@@ -337,7 +337,7 @@ Result: over 130000 consumed messages per second on macbook pro 2016
 Local run in docker:
 ```bash
     make docker-run-environment
-    docker-create-benchmark-manual-commit-consumer-topic
+    make docker-create-benchmark-manual-commit-consumer-topic
     make docker-run-benchmark-manual-commit-consumer-interactive
 ```
 
