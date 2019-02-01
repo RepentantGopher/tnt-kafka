@@ -270,14 +270,23 @@ lua_consumer_poll(struct lua_State *L) {
 
 static int
 lua_consumer_poll_msg(struct lua_State *L) {
-    if (lua_gettop(L) != 1)
-        luaL_error(L, "Usage: msg, err = consumer:poll_msg()");
+    if (lua_gettop(L) != 2)
+        luaL_error(L, "Usage: msgs = consumer:poll_msg(msgs_limit)");
 
     consumer_t *consumer = lua_check_consumer(L, 1);
+    int counter = 0;
+    int msgs_limit = lua_tonumber(L, 2);
+    rd_kafka_event_t *event = NULL;
+    lua_createtable(L, msgs_limit, 0);
 
-    rd_kafka_event_t *event = rd_kafka_queue_poll(consumer->rd_msg_queue, 0);
-    if (event != NULL) {
+    while (msgs_limit > counter) {
+        event = rd_kafka_queue_poll(consumer->rd_msg_queue, 0);
+        if (event == NULL) {
+            break;
+        }
         if (rd_kafka_event_type(event) == RD_KAFKA_EVENT_FETCH) {
+            counter += 1;
+
             msg_t *msg;
             msg = malloc(sizeof(msg_t));
             msg->rd_message = rd_kafka_event_message_next(event);
@@ -288,18 +297,12 @@ lua_consumer_poll_msg(struct lua_State *L) {
 
             luaL_getmetatable(L, consumer_msg_label);
             lua_setmetatable(L, -2);
-            return 1;
+
+            lua_rawseti(L, -2, counter);
         } else {
-            lua_pushnil(L);
-            lua_pushfstring(L,
-                            "got unexpected event type of '%s'",
-                            rd_kafka_event_name(event));
             rd_kafka_event_destroy(event);
-            return 2;
         }
     }
-
-    lua_pushnil(L);
     return 1;
 }
 

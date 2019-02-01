@@ -47,15 +47,13 @@ end
 jit.off(Consumer._poll)
 
 function Consumer:_poll_msg()
-    local msg, err
+    local msgs
     while true do
-        msg, err = self._consumer:poll_msg()
-        if err ~= nil then
-            log.error(err)
-            -- throtling poll
-            fiber.sleep(0.01)
-        elseif msg ~= nil then
-            self._output_ch:put(msg)
+        msgs = self._consumer:poll_msg(100)
+        if #msgs > 0 then
+            for _, msg in ipairs(msgs) do
+                self._output_ch:put(msg)
+            end
             fiber.yield()
         else
             -- throtling poll
