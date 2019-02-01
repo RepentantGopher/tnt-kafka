@@ -2,9 +2,7 @@ tnt-kafka
 =========
 Full featured high performance kafka library for Tarantool based on [librdkafka](https://github.com/edenhill/librdkafka). 
 
-Can produce more then 80k messages per second and consume more then 130k messages per second.
-
-Library was tested with librdkafka v0.11.5
+Can produce more then 150k messages per second and consume more then 140k messages per second.
 
 # Features
 * Kafka producer and consumer implementations.
@@ -12,6 +10,20 @@ Library was tested with librdkafka v0.11.5
 * Mostly errorless functions and methods. Error handling in Tarantool ecosystem is quite a mess, 
 some libraries throws lua native `error` while others throws `box.error` instead. `tnt-kafka` returns 
 non critical errors as strings which allows you to decide how to handle it.
+
+# Requirements 
+* Tarantool >= 1.10.2
+* Tarantool development headers 
+* librdkafka >= 0.11.5
+* librdkafka development headers
+* make
+* cmake
+* gcc 
+
+# Installation
+```bash
+    tarantoolctl rocks install https://raw.githubusercontent.com/tarantool/tnt-kafka/master/rockspecs/tnt-kafka-scm-1.rockspec
+```
 
 # Examples
 
