@@ -135,20 +135,21 @@ end
 jit.off(Producer._poll)
 
 function Producer:_msg_delivery_poll()
-    local id, err, delivery_chan
+    local count, err
     while true do
-        id, err = self._producer:msg_delivery_poll()
-        if id ~= nil then
-            delivery_chan = self._delivery_map[id]
-            if delivery_chan ~= nil then
-                delivery_chan:put(err)
+        local count, err
+        while true do
+            count, err = self._producer:msg_delivery_poll(100)
+            if err ~= nil then
+                log.error(err)
+                -- throtling poll
+                fiber.sleep(0.01)
+            elseif count > 0 then
+                fiber.yield()
             else
-                log.error("Kafka Consumer: delivery channel with id = '%d' not found", id)
+                -- throtling poll
+                fiber.sleep(0.01)
             end
-            fiber.yield()
-        else
-            -- throtling poll
-            fiber.sleep(0.01)
         end
     end
 end
@@ -160,19 +161,22 @@ function Producer:produce_async(msg)
     return err
 end
 
-function Producer:produce(msg)
-    self._counter = self._counter + 1
-    local id = self._counter
-    local delivery_chan = fiber.channel(1)
-    self._delivery_map[id] = delivery_chan
+local function dr_callback_factory(delivery_chan)
+    return function(err)
+        delivery_chan:put(err)
+    end
+end
 
-    msg.id = id
+function Producer:produce(msg)
+    local delivery_chan = fiber.channel(1)
+
+    msg.dr_callback = dr_callback_factory(delivery_chan)
+
     local err = self._producer:produce(msg)
     if err == nil then
         err = delivery_chan:get()
     end
 
-    self._delivery_map[id] = nil
     return err
 end
 

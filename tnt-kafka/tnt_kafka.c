@@ -544,15 +544,15 @@ destroy_producer_topics(producer_topics_t *topics) {
 // Cause `rd_kafka_conf_set_events(rd_config, RD_KAFKA_EVENT_DR)` produces segfault with queue api, we are forced to
 // implement our own thread safe queue to push incoming events from callback thread to lua thread.
 typedef struct {
-    double id;
+    int dr_callback;
     int err;
 } queue_element_t;
 
 queue_element_t *
-new_queue_element(double id, int err) {
+new_queue_element(int dr_callback, int err) {
     queue_element_t *element;
     element = malloc(sizeof(queue_element_t));
-    element->id = id;
+    element->dr_callback = dr_callback;
     element->err = err;
     return element;
 }
@@ -573,11 +573,16 @@ typedef struct {
     queue_node_t *tail;
 } queue_t;
 
+/**
+ * Pop without locking mutex.
+ * Caller must lock and unlock queue mutex by itself.
+ * Use with caution!
+ * @param queue
+ * @return
+ */
 static queue_element_t *
-queue_pop(queue_t *queue) {
+queue_lockfree_pop(queue_t *queue) {
     queue_element_t *output = NULL;
-
-    pthread_mutex_lock(&queue->lock);
 
     if (queue->head != NULL) {
         output = queue->head->element;
@@ -588,6 +593,15 @@ queue_pop(queue_t *queue) {
             queue->tail = NULL;
         }
     }
+
+    return output;
+}
+
+static queue_element_t *
+queue_pop(queue_t *queue) {
+    pthread_mutex_lock(&queue->lock);
+
+    queue_element_t *output = queue_lockfree_pop(queue);
 
     pthread_mutex_unlock(&queue->lock);
 
@@ -702,29 +716,53 @@ lua_producer_poll(struct lua_State *L) {
 
 static int
 lua_producer_msg_delivery_poll(struct lua_State *L) {
-    if (lua_gettop(L) != 1)
-        luaL_error(L, "Usage: id, err = producer:msg_delivery_poll()");
+    if (lua_gettop(L) != 2)
+        luaL_error(L, "Usage: count, err = producer:msg_delivery_poll(events_limit)");
 
     producer_t *producer = lua_check_producer(L, 1);
 
-    queue_element_t *element = queue_pop(producer->delivery_queue);
-    if (element != NULL) {
-        lua_pushnumber(L, element->id);
+    int events_limit = lua_tonumber(L, 2);
+    int callbacks_count = 0;
+    char *err_str = NULL;
+    queue_element_t *element = NULL;
+
+    pthread_mutex_lock(&producer->delivery_queue->lock);
+
+    while (events_limit > callbacks_count) {
+        element = queue_lockfree_pop(producer->delivery_queue);
+        if (element == NULL) {
+            break;
+        }
+        callbacks_count += 1;
+        lua_rawgeti(L, LUA_REGISTRYINDEX, element->dr_callback);
         if (element->err != RD_KAFKA_RESP_ERR_NO_ERROR) {
-            const char *const_err_str = rd_kafka_err2str(element->err);
-            char err_str[512];
-            strcpy(err_str, const_err_str);
-            int fail = safe_pushstring(L, err_str);
-            if (fail) {
-                return lua_push_error(L);
-            }
+            lua_pushstring(L, (char *)rd_kafka_err2str(element->err));
         } else {
             lua_pushnil(L);
         }
+        /* do the call (1 arguments, 0 result) */
+        if (lua_pcall(L, 1, 0, 0) != 0) {
+            err_str = (char *)lua_tostring(L, -1);
+        }
+        luaL_unref(L, LUA_REGISTRYINDEX, element->dr_callback);
         destroy_queue_element(element);
-        return 2;
+        if (err_str != NULL) {
+            break;
+        }
     }
-    return 0;
+
+    pthread_mutex_unlock(&producer->delivery_queue->lock);
+
+    lua_pushnumber(L, (double)callbacks_count);
+    if (err_str != NULL) {
+        int fail = safe_pushstring(L, err_str);
+        if (fail) {
+            return lua_push_error(L);
+        }
+    } else {
+        lua_pushnil(L);
+    }
+    return 2;
 }
 
 static int
@@ -764,10 +802,10 @@ lua_producer_produce(struct lua_State *L) {
 
     // create delivery callback queue if got msg id
     queue_element_t *element = NULL;
-    lua_pushstring(L, "id");
+    lua_pushstring(L, "dr_callback");
     lua_gettable(L, -2 );
-    if (lua_isnumber(L, -1)) {
-        element = new_queue_element(lua_tonumber(L, -1), RD_KAFKA_RESP_ERR_NO_ERROR);
+    if (lua_isfunction(L, -1)) {
+        element = new_queue_element(luaL_ref(L, LUA_REGISTRYINDEX), RD_KAFKA_RESP_ERR_NO_ERROR);
         if (element == NULL) {
             int fail = safe_pushstring(L, "failed to create callback message");
             return fail ? lua_push_error(L): 1;

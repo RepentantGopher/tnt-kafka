@@ -14,7 +14,12 @@ box.once('init', function()
 end)
 
 local function produce()
-    local producer, err = tnt_kafka.Producer.create({brokers = "kafka:9092"})
+    local producer, err = tnt_kafka.Producer.create({
+        brokers = "kafka:9092",
+        options = {
+            ["queue.buffering.max.ms"] = "100",
+        }
+    })
     if err ~= nil then
         print(err)
         os.exit(1)
@@ -22,7 +27,7 @@ local function produce()
 
     local before = clock.monotonic64()
     local input_ch = fiber.channel();
-    for i = 1, 120000 do
+    for i = 1, 12000 do
         fiber.create(function()
             while true do
                 if input_ch:is_closed() then
@@ -39,9 +44,9 @@ local function produce()
                             --                    print(err)
                             fiber.sleep(0.1)
                         else
-                            if value % 10000 == 0 then
-                                log.info("done %d", value)
-                            end
+--                            if value % 10000 == 0 then
+--                                log.info("done %d", value)
+--                            end
                             break
                         end
                     end
