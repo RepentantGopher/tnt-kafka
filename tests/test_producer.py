@@ -4,7 +4,15 @@ import tarantool
 
 
 def test_producer():
-    server = tarantool.connect("127.0.0.1", 3301)
+    server = tarantool.Connection(
+        "127.0.0.1", 3301,
+        user="guest",
+        password=None,
+        socket_timeout=30,
+        reconnect_max_attempts=3,
+        reconnect_delay=1,
+        connect_now=True
+    )
 
     server.call("producer", (
         (
@@ -48,15 +56,15 @@ def test_producer():
 
         assert kafka_output == [
             {
-                "key": None,
+                "key": "1",
                 "value": "1"
             },
             {
-                "key": None,
+                "key": "2",
                 "value": "2"
             },
             {
-                "key": None,
+                "key": "3",
                 "value": "3"
             },
         ]

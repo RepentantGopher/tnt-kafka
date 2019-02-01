@@ -50,19 +50,7 @@ def test_consumer():
                                   reconnect_delay=1,
                                   connect_now=True)
 
-    attempts = 0
-    while True:
-        try:
-            response = server.call("consumer.consume", ())
-        # tarantool in docker sometimes stacks
-        except:
-            attempts += 1
-            if attempts < 3:
-                continue
-            else:
-                assert True is False
-        else:
-            break
+    response = server.call("consumer.consume", ())
 
     assert set(*response) == {
         "test1",
