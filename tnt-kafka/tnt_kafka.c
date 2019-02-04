@@ -194,8 +194,10 @@ lua_consumer_msg_gc(struct lua_State *L) {
 typedef struct {
     rd_kafka_t *rd_consumer;
     rd_kafka_topic_partition_list_t *topics;
-    rd_kafka_queue_t *rd_event_queue;
-    rd_kafka_queue_t *rd_msg_queue;
+    rd_kafka_queue_t                *rd_event_queue;
+    rd_kafka_queue_t                *rd_msg_queue;
+    int                             error_cb_ref;
+    int                             log_cb_ref;
 } consumer_t;
 
 static inline consumer_t *
@@ -356,12 +358,65 @@ lua_consumer_poll_msg(struct lua_State *L) {
     return 1;
 }
 
-// TODO: implement logs and errors notifications
-//static int
-//lua_consumer_poll_logs(struct lua_State *L) {
-//
-//    return 0;
-//}
+static int
+lua_consumer_poll_events(struct lua_State *L) {
+    if (lua_gettop(L) != 2)
+        luaL_error(L, "Usage: count, err = consumer:poll_events(events_limit)");
+
+    consumer_t *consumer = lua_check_consumer(L, 1);
+    int events_limit = lua_tonumber(L, 2);
+    rd_kafka_event_t *event = NULL;
+    int events_count = 0;
+    char *err_str = NULL;
+    while (events_count < events_limit) {
+        event = rd_kafka_queue_poll(consumer->rd_event_queue, 0);
+        if (event == NULL) {
+            break;
+        }
+        events_count++;
+        if (rd_kafka_event_type(event) == RD_KAFKA_EVENT_ERROR) {
+            const char *err = rd_kafka_event_error_string (event);
+            lua_rawgeti(L, LUA_REGISTRYINDEX, consumer->error_cb_ref);
+            lua_pushstring(L, (char *)err);
+            /* do the call (1 arguments, 0 result) */
+            if (lua_pcall(L, 1, 0, 0) != 0) {
+                err_str = (char *)lua_tostring(L, -1);
+            }
+        } else if (rd_kafka_event_type(event) == RD_KAFKA_EVENT_LOG) {
+            const char **fac = malloc(sizeof(char *));
+            const char **str = malloc(sizeof(char *));
+            int level = 0;
+            if (rd_kafka_event_log(event, fac, str, &level) == 0) {
+                lua_rawgeti(L, LUA_REGISTRYINDEX, consumer->log_cb_ref);
+                lua_pushstring(L, *fac);
+                lua_pushstring(L, *str);
+                lua_pushnumber(L, (double)level);
+                /* do the call (3 arguments, 0 result) */
+                if (lua_pcall(L, 3, 0, 0) != 0) {
+                    err_str = (char *)lua_tostring(L, -1);
+                }
+            }
+            free(fac);
+            free(str);
+        }
+
+        rd_kafka_event_destroy(event);
+
+        if (err_str != NULL) {
+            break;
+        }
+    }
+    lua_pushnumber(L, (double)events_count);
+    if (err_str != NULL) {
+        int fail = safe_pushstring(L, err_str);
+        if (fail) {
+            return lua_push_error(L);
+        }
+    } else {
+        lua_pushnil(L);
+    }
+    return 2;
+}
 
 static int
 lua_consumer_store_offset(struct lua_State *L) {
@@ -381,15 +436,8 @@ lua_consumer_store_offset(struct lua_State *L) {
 }
 
 static rd_kafka_resp_err_t
-consumer_close(consumer_t *consumer) {
+consumer_close(struct lua_State *L, consumer_t *consumer) {
     rd_kafka_resp_err_t err = RD_KAFKA_RESP_ERR_NO_ERROR;
-
-    if (consumer->rd_consumer != NULL) {
-        err = rd_kafka_consumer_close(consumer->rd_consumer);
-        if (err) {
-            return err;
-        }
-    }
 
     if (consumer->rd_msg_queue != NULL) {
         rd_kafka_queue_destroy(consumer->rd_msg_queue);
@@ -399,8 +447,23 @@ consumer_close(consumer_t *consumer) {
         rd_kafka_queue_destroy(consumer->rd_event_queue);
     }
 
+    if (consumer->error_cb_ref != LUA_REFNIL) {
+        luaL_unref(L, LUA_REGISTRYINDEX, consumer->error_cb_ref);
+    }
+
+    if (consumer->log_cb_ref != LUA_REFNIL) {
+        luaL_unref(L, LUA_REGISTRYINDEX, consumer->log_cb_ref);
+    }
+
     if (consumer->topics != NULL) {
         rd_kafka_topic_partition_list_destroy(consumer->topics);
+    }
+
+    if (consumer->rd_consumer != NULL) {
+        err = rd_kafka_consumer_close(consumer->rd_consumer);
+        if (err) {
+            return err;
+        }
     }
 
     if (consumer->rd_consumer != NULL) {
@@ -422,7 +485,7 @@ lua_consumer_close(struct lua_State *L) {
         return 1;
     }
 
-    rd_kafka_resp_err_t err = consumer_close(*consumer_p);
+    rd_kafka_resp_err_t err = consumer_close(L, *consumer_p);
     if (err) {
         lua_pushboolean(L, 1);
 
@@ -442,7 +505,7 @@ static int
 lua_consumer_gc(struct lua_State *L) {
     consumer_t **consumer_p = (consumer_t **)luaL_checkudata(L, 1, consumer_label);
     if (consumer_p && *consumer_p) {
-        consumer_close(*consumer_p);
+        consumer_close(L, *consumer_p);
     }
     if (consumer_p)
         *consumer_p = NULL;
@@ -454,6 +517,11 @@ lua_create_consumer(struct lua_State *L) {
     if (lua_gettop(L) != 1 || !lua_istable(L, 1))
         luaL_error(L, "Usage: consumer, err = create_consumer(conf)");
 
+    char errstr[512];
+    rd_kafka_conf_t *rd_config = rd_kafka_conf_new();
+    rd_kafka_topic_conf_t *topic_conf = rd_kafka_topic_conf_new();
+    rd_kafka_conf_set_default_topic_conf(rd_config, topic_conf);
+
     lua_pushstring(L, "brokers");
     lua_gettable(L, -2 );
     const char *brokers = lua_tostring(L, -1);
@@ -464,14 +532,40 @@ lua_create_consumer(struct lua_State *L) {
         return fail ? lua_push_error(L): 2;
     }
 
-    char errstr[512];
+    int error_cb_ref = LUA_REFNIL;
+    lua_pushstring(L, "error_callback");
+    lua_gettable(L, -2 );
+    if (lua_isfunction(L, -1)) {
+        error_cb_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    } else {
+        lua_pop(L, 1);
+    }
 
-    rd_kafka_conf_t *rd_config = rd_kafka_conf_new();
-    rd_kafka_topic_conf_t *topic_conf = rd_kafka_topic_conf_new();
-    rd_kafka_conf_set_default_topic_conf(rd_config, topic_conf);
+    int log_cb_ref = LUA_REFNIL;
+    lua_pushstring(L, "log_callback");
+    lua_gettable(L, -2 );
+    if (lua_isfunction(L, -1)) {
+        log_cb_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+        if (rd_kafka_conf_set(rd_config, "log.queue", "true", errstr, sizeof(errstr))) {
+            lua_pushnil(L);
+            int fail = safe_pushstring(L, errstr);
+            return fail ? lua_push_error(L): 2;
+        }
+    } else {
+        lua_pop(L, 1);
+    }
+
+    rd_kafka_event_type_t event_types = RD_KAFKA_EVENT_NONE;
+    if (error_cb_ref != LUA_REFNIL) {
+        event_types = event_types | RD_KAFKA_EVENT_ERROR;
+    }
+    if (log_cb_ref != LUA_REFNIL) {
+        event_types = event_types | RD_KAFKA_EVENT_LOG;
+    }
+    rd_kafka_conf_set_events(rd_config, event_types);
 
     lua_pushstring(L, "options");
-    lua_gettable(L, -2 );
+    lua_gettable(L, -2);
     if (lua_istable(L, -1)) {
         lua_pushnil(L);
         // stack now contains: -1 => nil; -2 => table
@@ -515,12 +609,27 @@ lua_create_consumer(struct lua_State *L) {
     rd_kafka_queue_t *rd_event_queue = rd_kafka_queue_get_main(rd_consumer);
     rd_kafka_queue_t *rd_msg_queue = rd_kafka_queue_get_consumer(rd_consumer);
 
+    if (log_cb_ref != LUA_REFNIL) {
+        // redirect logs to main queue
+        rd_kafka_resp_err_t err = rd_kafka_set_log_queue(rd_consumer, rd_event_queue);
+        if (err) {
+            lua_pushboolean(L, 1);
+            const char *const_err_str = rd_kafka_err2str(err);
+            char err_str[512];
+            strcpy(err_str, const_err_str);
+            int fail = safe_pushstring(L, err_str);
+            return fail ? lua_push_error(L): 2;
+        }
+    }
+
     consumer_t *consumer;
     consumer = malloc(sizeof(consumer_t));
     consumer->rd_consumer = rd_consumer;
     consumer->topics = NULL;
     consumer->rd_event_queue = rd_event_queue;
     consumer->rd_msg_queue = rd_msg_queue;
+    consumer->error_cb_ref = error_cb_ref;
+    consumer->log_cb_ref = log_cb_ref;
 
     consumer_t **consumer_p = (consumer_t **)lua_newuserdata(L, sizeof(consumer));
     *consumer_p = consumer;
@@ -866,6 +975,8 @@ lua_producer_produce(struct lua_State *L) {
     } else {
         lua_pop(L, 1);
     }
+
+    // pop msg
     lua_pop(L, 1);
 
     producer_t *producer = lua_check_producer(L, 1);
@@ -895,7 +1006,8 @@ lua_producer_produce(struct lua_State *L) {
     return 0;
 }
 
-static ssize_t producer_flush(va_list args) {
+static ssize_t
+producer_flush(va_list args) {
     rd_kafka_resp_err_t err = RD_KAFKA_RESP_ERR_NO_ERROR;
     rd_kafka_t *rd_producer = va_arg(args, rd_kafka_t *);
     while (true) {
@@ -1079,6 +1191,7 @@ luaopen_kafka_tntkafka(lua_State *L) {
             {"unsubscribe", lua_consumer_unsubscribe},
             {"poll", lua_consumer_poll},
             {"poll_msg", lua_consumer_poll_msg},
+            {"poll_events", lua_consumer_poll_events},
             {"store_offset", lua_consumer_store_offset},
             {"close", lua_consumer_close},
             {"__tostring", lua_consumer_tostring},

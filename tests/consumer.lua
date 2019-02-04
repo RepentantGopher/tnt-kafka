@@ -8,12 +8,24 @@ local consumer = nil
 
 local function create(brokers)
     local err
-    consumer, err = tnt_kafka.Consumer.create({brokers = brokers, options = {
-        ["enable.auto.offset.store"] = "false",
-        ["group.id"] = "test_consumer",
-        ["auto.offset.reset"] = "earliest",
-        ["enable.partition.eof"] = "false",
-    }})
+    local error_callback = function(err)
+        log.error("got error: %s", err)
+    end
+    local log_callback = function(fac, str, level)
+        log.info("got log: %d - %s - %s", level, fac, str)
+    end
+    consumer, err = tnt_kafka.Consumer.create({
+        brokers = brokers,
+        options = {
+            ["enable.auto.offset.store"] = "false",
+            ["group.id"] = "test_consumer",
+            ["auto.offset.reset"] = "earliest",
+            ["enable.partition.eof"] = "false",
+            ["log_level"] = "7",
+        },
+        error_callback = error_callback,
+        log_callback = log_callback,
+    })
     if err ~= nil then
         log.error("got err %s", err)
         box.error{code = 500, reason = err}

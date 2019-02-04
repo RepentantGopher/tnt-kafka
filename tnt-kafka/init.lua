@@ -31,6 +31,12 @@ function Consumer.create(config)
         new:_poll_msg()
     end)
 
+    if config.log_callback ~= nil or config.error_callback ~= nil then
+        new._poll_events_fiber = fiber.create(function()
+            new:_poll_events()
+        end)
+    end
+
     return new, nil
 end
 
@@ -64,9 +70,31 @@ end
 
 jit.off(Consumer._poll_msg)
 
+function Consumer:_poll_events()
+    local count, err
+    while true do
+        count, err = self._consumer:poll_events(100)
+        if err ~= nil then
+            log.error("Consumer poll events error: %s", err)
+            -- throtling poll
+            fiber.sleep(0.01)
+        elseif count > 0 then
+            fiber.yield()
+        else
+            -- throtling poll
+            fiber.sleep(0.01)
+        end
+    end
+end
+
+jit.off(Consumer._poll_events)
+
 function Consumer:close()
     self._poll_msg_fiber:cancel()
     self._poll_fiber:cancel()
+    if self._poll_events_fiber ~= nil then
+        self._poll_events_fiber:cancel()
+    end
     self._output_ch:close()
 
     local ok, err = self._consumer:close()

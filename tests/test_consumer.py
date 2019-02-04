@@ -72,7 +72,7 @@ def test_consumer_should_consume_msgs():
     server.call("consumer.close", [])
 
 
-def test_consumer_should_consume_msgs_from_miltiple_topics():
+def test_consumer_should_consume_msgs_from_multiple_topics():
     message1 = {
         "key": "test1",
         "value": "test1"
