@@ -79,6 +79,10 @@ function Consumer:subscribe(topics)
     return self._consumer:subscribe(topics)
 end
 
+function Consumer:unsubscribe(topics)
+    return self._consumer:unsubscribe(topics)
+end
+
 function Consumer:output()
     return self._output_ch
 end

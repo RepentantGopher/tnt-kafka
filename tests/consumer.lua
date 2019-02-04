@@ -4,13 +4,11 @@ local os = require("os")
 local fiber = require('fiber')
 local tnt_kafka = require('tnt-kafka')
 
-local TOPIC_NAME = "test_consumer"
+local consumer = nil
 
-
-local function consume()
-    log.info("consume called")
-
-    local consumer, err = tnt_kafka.Consumer.create({brokers = "kafka:9092", options = {
+local function create(brokers)
+    local err
+    consumer, err = tnt_kafka.Consumer.create({brokers = brokers, options = {
         ["enable.auto.offset.store"] = "false",
         ["group.id"] = "test_consumer",
         ["auto.offset.reset"] = "earliest",
@@ -21,18 +19,35 @@ local function consume()
         box.error{code = 500, reason = err}
     end
     log.info("consumer created")
+end
 
+local function subscribe(topics)
     log.info("consumer subscribing")
-    local err = consumer:subscribe({TOPIC_NAME})
+    log.info(topics)
+    local err = consumer:subscribe(topics)
     if err ~= nil then
         log.error("got err %s", err)
         box.error{code = 500, reason = err}
     end
     log.info("consumer subscribed")
+end
 
-    log.info("consumer polling")
+local function unsubscribe(topics)
+    log.info("consumer unsubscribing")
+    log.info(topics)
+    local err = consumer:unsubscribe(topics)
+    if err ~= nil then
+        log.error("got err %s", err)
+        box.error{code = 500, reason = err}
+    end
+    log.info("consumer unsubscribed")
+end
+
+local function consume(timeout)
+    log.info("consume called")
+
     local consumed = {}
-    fiber.create(function()
+    local f = fiber.create(function()
         local out = consumer:output()
         while true do
             if out:is_closed() then
@@ -52,21 +67,29 @@ local function consume()
         end
     end)
 
-    log.info("consumer wait")
-    fiber.sleep(10)
-    log.info("consumer ends")
+    log.info("consume wait")
+    fiber.sleep(timeout)
+    log.info("consume ends")
 
-    log.info("stopping consumer")
+    f:cancel()
+
+    return consumed
+end
+
+local function close()
+    log.info("closing consumer")
     local exists, err = consumer:close()
     if err ~= nil then
         log.error("got err %s", err)
         box.error{code = 500, reason = err}
     end
-    log.info("stopped consumer")
-
-    return consumed
+    log.info("consumer closed")
 end
 
 return {
-    consume = consume
+    create = create,
+    subscribe = subscribe,
+    unsubscribe = unsubscribe,
+    consume = consume,
+    close = close,
 }
