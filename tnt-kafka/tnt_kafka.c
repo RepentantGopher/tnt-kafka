@@ -178,6 +178,7 @@ lua_consumer_msg_gc(struct lua_State *L) {
     msg_t **msg_p = (msg_t **)luaL_checkudata(L, 1, consumer_msg_label);
     if (msg_p && *msg_p) {
         rd_kafka_event_destroy((*msg_p)->rd_event);
+        free(*msg_p);
     }
     if (msg_p)
         *msg_p = NULL;
