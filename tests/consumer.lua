@@ -5,24 +5,37 @@ local fiber = require('fiber')
 local tnt_kafka = require('tnt-kafka')
 
 local consumer = nil
+local errors = {}
+local logs = {}
 
-local function create(brokers)
+local function create(brokers, additional_opts)
     local err
+    errors = {}
+    logs = {}
     local error_callback = function(err)
         log.error("got error: %s", err)
+        table.insert(errors, err)
     end
     local log_callback = function(fac, str, level)
         log.info("got log: %d - %s - %s", level, fac, str)
+        table.insert(logs, string.format("got log: %d - %s - %s", level, fac, str))
+    end
+
+    local options = {
+        ["enable.auto.offset.store"] = "false",
+        ["group.id"] = "test_consumer",
+        ["auto.offset.reset"] = "earliest",
+        ["enable.partition.eof"] = "false",
+        ["log_level"] = "7",
+    }
+    if additional_opts ~= nil then
+        for key, value in pairs(additional_opts) do
+            options[key] = value
+        end
     end
     consumer, err = tnt_kafka.Consumer.create({
         brokers = brokers,
-        options = {
-            ["enable.auto.offset.store"] = "false",
-            ["group.id"] = "test_consumer",
-            ["auto.offset.reset"] = "earliest",
-            ["enable.partition.eof"] = "false",
-            ["log_level"] = "7",
-        },
+        options = options,
         error_callback = error_callback,
         log_callback = log_callback,
     })
@@ -88,6 +101,14 @@ local function consume(timeout)
     return consumed
 end
 
+local function get_errors()
+    return errors
+end
+
+local function get_logs()
+    return logs
+end
+
 local function close()
     log.info("closing consumer")
     local exists, err = consumer:close()
@@ -104,4 +125,6 @@ return {
     unsubscribe = unsubscribe,
     consume = consume,
     close = close,
+    get_errors = get_errors,
+    get_logs = get_logs,
 }

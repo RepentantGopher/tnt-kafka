@@ -1,5 +1,7 @@
-from aiokafka import AIOKafkaProducer
+import time
 import asyncio
+
+from aiokafka import AIOKafkaProducer
 import tarantool
 
 
@@ -196,5 +198,35 @@ def test_consumer_should_partially_unsubscribe_from_topics():
     response = server.call("consumer.consume", [3])
 
     assert set(*response) == {"test4"}
+
+    server.call("consumer.close", [])
+
+
+def test_consumer_should_log_errors():
+    server = get_server()
+
+    server.call("consumer.create", ["kafka:9090"])
+
+    time.sleep(2)
+
+    response = server.call("consumer.get_errors", [])
+
+    assert len(response) > 0
+    assert len(response[0]) > 0
+
+    server.call("consumer.close", [])
+
+
+def test_consumer_should_log_debug():
+    server = get_server()
+
+    server.call("consumer.create", ["kafka:9092", {"debug": "consumer,cgrp,topic,fetch"}])
+
+    time.sleep(2)
+
+    response = server.call("consumer.get_logs", [])
+
+    assert len(response) > 0
+    assert len(response[0]) > 0
 
     server.call("consumer.close", [])

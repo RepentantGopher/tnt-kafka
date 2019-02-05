@@ -31,9 +31,15 @@ function Consumer.create(config)
         new:_poll_msg()
     end)
 
-    if config.log_callback ~= nil or config.error_callback ~= nil then
-        new._poll_events_fiber = fiber.create(function()
-            new:_poll_events()
+    if config.log_callback ~= nil then
+        new._poll_logs_fiber = fiber.create(function()
+            new:_poll_logs()
+        end)
+    end
+
+    if config.error_callback ~= nil then
+        new._poll_errors_fiber = fiber.create(function()
+            new:_poll_errors()
         end)
     end
 
@@ -70,30 +76,52 @@ end
 
 jit.off(Consumer._poll_msg)
 
-function Consumer:_poll_events()
+function Consumer:_poll_logs()
     local count, err
     while true do
-        count, err = self._consumer:poll_events(100)
+        count, err = self._consumer:poll_logs(100)
         if err ~= nil then
-            log.error("Consumer poll events error: %s", err)
+            log.error("Consumer poll logs error: %s", err)
             -- throtling poll
-            fiber.sleep(0.01)
+            fiber.sleep(0.1)
         elseif count > 0 then
             fiber.yield()
         else
             -- throtling poll
-            fiber.sleep(0.01)
+            fiber.sleep(1)
         end
     end
 end
 
-jit.off(Consumer._poll_events)
+jit.off(Consumer._poll_logs)
+
+function Consumer:_poll_errors()
+    local count, err
+    while true do
+        count, err = self._consumer:poll_errors(100)
+        if err ~= nil then
+            log.error("Consumer poll errors error: %s", err)
+            -- throtling poll
+            fiber.sleep(0.1)
+        elseif count > 0 then
+            fiber.yield()
+        else
+            -- throtling poll
+            fiber.sleep(1)
+        end
+    end
+end
+
+jit.off(Consumer._poll_errors)
 
 function Consumer:close()
     self._poll_msg_fiber:cancel()
     self._poll_fiber:cancel()
-    if self._poll_events_fiber ~= nil then
-        self._poll_events_fiber:cancel()
+    if self._poll_logs_fiber ~= nil then
+        self._poll_logs_fiber:cancel()
+    end
+    if self._poll_errors_fiber ~= nil then
+        self._poll_errors_fiber:cancel()
     end
     self._output_ch:close()
 
