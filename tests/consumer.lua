@@ -38,6 +38,9 @@ local function create(brokers, additional_opts)
         options = options,
         error_callback = error_callback,
         log_callback = log_callback,
+        default_topic_options = {
+            ["auto.offset.reset"] = "earliest",
+        },
     })
     if err ~= nil then
         log.error("got err %s", err)

@@ -53,6 +53,9 @@ non critical errors as strings which allows you to decide how to handle it.
         }, -- options for librdkafka
         error_callback = error_callback, -- optional callback for errors
         log_callback = log_callback, -- optional callback for logs and debug messages
+        default_topic_options = {
+            ["auto.offset.reset"] = "earliest",
+        }, -- optional default topic options
     })
     if err ~= nil then
         print(err)
@@ -126,6 +129,9 @@ non critical errors as strings which allows you to decide how to handle it.
         }, -- options for librdkafka
         error_callback = error_callback, -- optional callback for errors
         log_callback = log_callback, -- optional callback for logs and debug messages
+        default_topic_options = {
+            ["auto.offset.reset"] = "earliest",
+        }, -- optional default topic options
     })
     if err ~= nil then
         print(err)
@@ -205,6 +211,9 @@ non critical errors as strings which allows you to decide how to handle it.
         options = {}, -- options for librdkafka
         error_callback = error_callback, -- optional callback for errors
         log_callback = log_callback, -- optional callback for logs and debug messages
+        default_topic_options = {
+            ["partitioner"] = "murmur2_random",
+        }, -- optional default topic options
     })
     if err ~= nil then
         print(err)
@@ -249,6 +258,9 @@ non critical errors as strings which allows you to decide how to handle it.
         options = {}, -- options for librdkafka
         error_callback = error_callback, -- optional callback for errors
         log_callback = log_callback, -- optional callback for logs and debug messages
+        default_topic_options = {
+            ["partitioner"] = "murmur2_random",
+        }, -- optional default topic options
     })
     if err ~= nil then
         print(err)

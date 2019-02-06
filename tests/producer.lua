@@ -36,6 +36,9 @@ local function create(brokers, additional_opts)
         options = options,
         log_callback = log_callback,
         error_callback = error_callback,
+        default_topic_options = {
+            ["partitioner"] = "murmur2_random",
+        },
     })
     if err ~= nil then
         log.error("got err %s", err)

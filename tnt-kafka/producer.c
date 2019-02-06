@@ -428,6 +428,37 @@ lua_create_producer(struct lua_State *L) {
 
     rd_kafka_conf_t *rd_config = rd_kafka_conf_new();
 
+    rd_kafka_topic_conf_t *topic_conf = rd_kafka_topic_conf_new();
+    lua_pushstring(L, "default_topic_options");
+    lua_gettable(L, -2);
+    if (lua_istable(L, -1)) {
+        lua_pushnil(L);
+        // stack now contains: -1 => nil; -2 => table
+        while (lua_next(L, -2)) {
+            // stack now contains: -1 => value; -2 => key; -3 => table
+            if (!(lua_isstring(L, -1)) || !(lua_isstring(L, -2))) {
+                lua_pushnil(L);
+                int fail = safe_pushstring(L, "producer config default topic options must contains only string keys and string values");
+                return fail ? lua_push_error(L): 2;
+            }
+
+            const char *value = lua_tostring(L, -1);
+            const char *key = lua_tostring(L, -2);
+            if (rd_kafka_topic_conf_set(topic_conf, key, value, errstr, sizeof(errstr))) {
+                lua_pushnil(L);
+                int fail = safe_pushstring(L, errstr);
+                return fail ? lua_push_error(L): 2;
+            }
+
+            // pop value, leaving original key
+            lua_pop(L, 1);
+            // stack now contains: -1 => key; -2 => table
+        }
+        // stack now contains: -1 => table
+    }
+    lua_pop(L, 1);
+    rd_kafka_conf_set_default_topic_conf(rd_config, topic_conf);
+
     event_queues_t *event_queues = new_event_queues();
     event_queues->delivery_queue = new_queue();
     rd_kafka_conf_set_dr_msg_cb(rd_config, msg_delivery_callback);
