@@ -1,5 +1,10 @@
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
+
+#include <lua.h>
+#include <lualib.h>
+#include <lauxlib.h>
 
 #include <librdkafka/rdkafka.h>
 
@@ -121,6 +126,46 @@ event_queues_t *new_event_queues() {
     return event_queues;
 }
 
-void destroy_event_queues(event_queues_t *event_queues) {
+void destroy_event_queues(struct lua_State *L, event_queues_t *event_queues) {
+    if (event_queues->log_queue != NULL) {
+        log_msg_t *msg = NULL;
+        while (true) {
+            msg = queue_pop(event_queues->log_queue);
+            if (msg == NULL) {
+                break;
+            }
+            destroy_log_msg(msg);
+        }
+        destroy_queue(event_queues->log_queue);
+    }
+    if (event_queues->error_queue != NULL) {
+        error_msg_t *msg = NULL;
+        while (true) {
+            msg = queue_pop(event_queues->error_queue);
+            if (msg == NULL) {
+                break;
+            }
+            destroy_error_msg(msg);
+        }
+        destroy_queue(event_queues->error_queue);
+    }
+    if (event_queues->delivery_queue != NULL) {
+        dr_msg_t *msg = NULL;
+        while (true) {
+            msg = queue_pop(event_queues->delivery_queue);
+            if (msg == NULL) {
+                break;
+            }
+            destroy_dr_msg(msg);
+        }
+        destroy_queue(event_queues->delivery_queue);
+    }
+    if (event_queues->error_cb_ref != LUA_REFNIL) {
+        luaL_unref(L, LUA_REGISTRYINDEX, event_queues->error_cb_ref);
+    }
+
+    if (event_queues->log_cb_ref != LUA_REFNIL) {
+        luaL_unref(L, LUA_REGISTRYINDEX, event_queues->log_cb_ref);
+    }
     free(event_queues);
 }

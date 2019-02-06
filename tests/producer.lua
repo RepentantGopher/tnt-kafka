@@ -6,13 +6,44 @@ local tnt_kafka = require('tnt-kafka')
 
 local TOPIC_NAME = "test_producer"
 
-return function(messages)
-    local producer, err = tnt_kafka.Producer.create({brokers = "kafka:9092", options = {}})
+local producer = nil
+local errors = {}
+local logs = {}
+
+local function create(brokers, additional_opts)
+    local err
+    local options = {}
+    errors = {}
+    logs = {}
+    local error_callback = function(err)
+        log.error("got error: %s", err)
+        table.insert(errors, err)
+    end
+    local log_callback = function(fac, str, level)
+        log.info("got log: %d - %s - %s", level, fac, str)
+        table.insert(logs, string.format("got log: %d - %s - %s", level, fac, str))
+    end
+
+    local options = {}
+    if additional_opts ~= nil then
+        for key, value in pairs(additional_opts) do
+            options[key] = value
+        end
+    end
+
+    producer, err = tnt_kafka.Producer.create({
+        brokers = brokers,
+        options = options,
+        log_callback = log_callback,
+        error_callback = error_callback,
+    })
     if err ~= nil then
         log.error("got err %s", err)
         box.error{code = 500, reason = err}
     end
+end
 
+local function produce(messages)
     for _, message in ipairs(messages) do
         local err = producer:produce({topic = TOPIC_NAME, key = message, value = message})
         if err ~= nil then
@@ -21,10 +52,28 @@ return function(messages)
             log.error("successfully sent value '%s'", message)
         end
     end
+end
 
+local function get_errors()
+    return errors
+end
+
+local function get_logs()
+    return logs
+end
+
+local function close()
     local err = producer:close()
     if err ~= nil then
         log.error("got err %s", err)
         box.error{code = 500, reason = err}
     end
 end
+
+return {
+    create = create,
+    produce = produce,
+    get_errors = get_errors,
+    get_logs = get_logs,
+    close = close,
+}

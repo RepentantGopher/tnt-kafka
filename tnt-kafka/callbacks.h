@@ -58,6 +58,6 @@ typedef struct {
 
 event_queues_t *new_event_queues();
 
-void destroy_event_queues(event_queues_t *event_queues);
+void destroy_event_queues(struct lua_State *L, event_queues_t *event_queues);
 
 #endif //TNT_KAFKA_CALLBACKS_H

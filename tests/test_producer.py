@@ -1,20 +1,26 @@
-from aiokafka import AIOKafkaConsumer
+import time
 import asyncio
+
+from aiokafka import AIOKafkaConsumer
 import tarantool
 
 
-def test_producer():
-    server = tarantool.Connection(
-        "127.0.0.1", 3301,
-        user="guest",
-        password=None,
-        socket_timeout=30,
-        reconnect_max_attempts=3,
-        reconnect_delay=1,
-        connect_now=True
-    )
+def get_server():
+    return tarantool.Connection("127.0.0.1", 3301,
+                                user="guest",
+                                password=None,
+                                socket_timeout=10,
+                                reconnect_max_attempts=3,
+                                reconnect_delay=1,
+                                connect_now=True)
 
-    server.call("producer", (
+
+def test_producer_should_produce_msgs():
+    server = get_server()
+
+    server.call("producer.create", ["kafka:9092"])
+
+    server.call("producer.produce", (
         (
             "1",
             "2",
@@ -70,3 +76,35 @@ def test_producer():
         ]
 
     loop.run_until_complete(test())
+
+    server.call("producer.close", [])
+
+
+def test_producer_should_log_errors():
+    server = get_server()
+
+    server.call("producer.create", ["kafka:9090"])
+
+    time.sleep(2)
+
+    response = server.call("producer.get_errors", [])
+
+    assert len(response) > 0
+    assert len(response[0]) > 0
+
+    server.call("producer.close", [])
+
+
+def test_producer_should_log_debug():
+    server = get_server()
+
+    server.call("producer.create", ["kafka:9092", {"debug": "broker,topic,msg"}])
+
+    time.sleep(2)
+
+    response = server.call("producer.get_logs", [])
+
+    assert len(response) > 0
+    assert len(response[0]) > 0
+
+    server.call("producer.close", [])

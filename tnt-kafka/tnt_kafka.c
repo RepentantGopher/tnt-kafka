@@ -61,6 +61,8 @@ luaopen_kafka_tntkafka(lua_State *L) {
             {"poll", lua_producer_poll},
             {"produce", lua_producer_produce},
             {"msg_delivery_poll", lua_producer_msg_delivery_poll},
+            {"poll_logs", lua_producer_poll_logs},
+            {"poll_errors", lua_producer_poll_errors},
             {"close", lua_producer_close},
             {"__tostring", lua_producer_tostring},
             {"__gc", lua_producer_gc},

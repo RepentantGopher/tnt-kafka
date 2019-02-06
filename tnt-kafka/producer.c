@@ -155,6 +155,108 @@ lua_producer_msg_delivery_poll(struct lua_State *L) {
 }
 
 int
+lua_producer_poll_logs(struct lua_State *L) {
+    if (lua_gettop(L) != 2)
+        luaL_error(L, "Usage: count, err = producer:poll_logs(limit)");
+
+    producer_t *producer = lua_check_producer(L, 1);
+    if (producer->event_queues == NULL || producer->event_queues->log_queue == NULL || producer->event_queues->log_cb_ref == LUA_REFNIL) {
+        lua_pushnumber(L, 0);
+        int fail = safe_pushstring(L, "Producer poll logs error: callback for logs is not set");
+        if (fail) {
+            return lua_push_error(L);
+        }
+        return 2;
+    }
+
+    int limit = lua_tonumber(L, 2);
+    log_msg_t *msg = NULL;
+    int count = 0;
+    char *err_str = NULL;
+    while (count < limit) {
+        msg = queue_pop(producer->event_queues->log_queue) ;
+        if (msg == NULL) {
+            break;
+        }
+        count++;
+        lua_rawgeti(L, LUA_REGISTRYINDEX, producer->event_queues->log_cb_ref);
+        lua_pushstring(L, msg->fac);
+        lua_pushstring(L, msg->buf);
+        lua_pushnumber(L, (double)msg->level);
+        /* do the call (3 arguments, 0 result) */
+        if (lua_pcall(L, 3, 0, 0) != 0) {
+            err_str = (char *)lua_tostring(L, -1);
+        }
+
+        destroy_log_msg(msg);
+
+        if (err_str != NULL) {
+            break;
+        }
+    }
+    lua_pushnumber(L, (double)count);
+    if (err_str != NULL) {
+        int fail = safe_pushstring(L, err_str);
+        if (fail) {
+            return lua_push_error(L);
+        }
+    } else {
+        lua_pushnil(L);
+    }
+    return 2;
+}
+
+int
+lua_producer_poll_errors(struct lua_State *L) {
+    if (lua_gettop(L) != 2)
+        luaL_error(L, "Usage: count, err = producer:poll_errors(limit)");
+
+    producer_t *producer = lua_check_producer(L, 1);
+    if (producer->event_queues == NULL || producer->event_queues->error_queue == NULL || producer->event_queues->error_cb_ref == LUA_REFNIL) {
+        lua_pushnumber(L, 0);
+        int fail = safe_pushstring(L, "Producer poll errors error: callback for logs is not set");
+        if (fail) {
+            return lua_push_error(L);
+        }
+        return 2;
+    }
+
+    int limit = lua_tonumber(L, 2);
+    error_msg_t *msg = NULL;
+    int count = 0;
+    char *err_str = NULL;
+    while (count < limit) {
+        msg = queue_pop(producer->event_queues->error_queue) ;
+        if (msg == NULL) {
+            break;
+        }
+        count++;
+        lua_rawgeti(L, LUA_REGISTRYINDEX, producer->event_queues->error_cb_ref);
+        lua_pushstring(L, msg->reason);
+        /* do the call (1 arguments, 0 result) */
+        if (lua_pcall(L, 1, 0, 0) != 0) {
+            err_str = (char *)lua_tostring(L, -1);
+        }
+
+        destroy_error_msg(msg);
+
+        if (err_str != NULL) {
+            break;
+        }
+    }
+    lua_pushnumber(L, (double)count);
+    if (err_str != NULL) {
+        int fail = safe_pushstring(L, err_str);
+        if (fail) {
+            return lua_push_error(L);
+        }
+    } else {
+        lua_pushnil(L);
+    }
+    return 2;
+}
+
+int
 lua_producer_produce(struct lua_State *L) {
     if (lua_gettop(L) != 2 || !lua_istable(L, 2))
         luaL_error(L, "Usage: err = producer:produce(msg)");
@@ -247,7 +349,7 @@ producer_flush(va_list args) {
 }
 
 static rd_kafka_resp_err_t
-producer_close(producer_t *producer) {
+producer_close(struct lua_State *L, producer_t *producer) {
     rd_kafka_resp_err_t err = RD_KAFKA_RESP_ERR_NO_ERROR;
 
     if (producer->rd_producer != NULL) {
@@ -259,18 +361,7 @@ producer_close(producer_t *producer) {
     }
 
     if (producer->event_queues != NULL) {
-        if (producer->event_queues->delivery_queue != NULL) {
-            dr_msg_t *msg = NULL;
-            while (true) {
-                msg = queue_pop(producer->event_queues->delivery_queue);
-                if (msg == NULL) {
-                    break;
-                }
-                destroy_dr_msg(msg);
-            }
-            destroy_queue(producer->event_queues->delivery_queue);
-        }
-        destroy_event_queues(producer->event_queues);
+        destroy_event_queues(L, producer->event_queues);
     }
 
     if (producer->rd_producer != NULL) {
@@ -291,7 +382,7 @@ lua_producer_close(struct lua_State *L) {
         return 1;
     }
 
-    rd_kafka_resp_err_t err = producer_close(*producer_p);
+    rd_kafka_resp_err_t err = producer_close(L, *producer_p);
     if (err) {
         lua_pushboolean(L, 1);
 
@@ -311,7 +402,7 @@ int
 lua_producer_gc(struct lua_State *L) {
     producer_t **producer_p = (producer_t **)luaL_checkudata(L, 1, producer_label);
     if (producer_p && *producer_p) {
-        producer_close(*producer_p);
+        producer_close(L, *producer_p);
     }
     if (producer_p)
         *producer_p = NULL;
@@ -340,6 +431,27 @@ lua_create_producer(struct lua_State *L) {
     event_queues_t *event_queues = new_event_queues();
     event_queues->delivery_queue = new_queue();
     rd_kafka_conf_set_dr_msg_cb(rd_config, msg_delivery_callback);
+
+    lua_pushstring(L, "error_callback");
+    lua_gettable(L, -2 );
+    if (lua_isfunction(L, -1)) {
+        event_queues->error_cb_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+        event_queues->error_queue = new_queue();
+        rd_kafka_conf_set_error_cb(rd_config, error_callback);
+    } else {
+        lua_pop(L, 1);
+    }
+
+    lua_pushstring(L, "log_callback");
+    lua_gettable(L, -2 );
+    if (lua_isfunction(L, -1)) {
+        event_queues->log_cb_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+        event_queues->log_queue = new_queue();
+        rd_kafka_conf_set_log_cb(rd_config, log_callback);
+    } else {
+        lua_pop(L, 1);
+    }
+
     rd_kafka_conf_set_opaque(rd_config, event_queues);
 
     lua_pushstring(L, "options");

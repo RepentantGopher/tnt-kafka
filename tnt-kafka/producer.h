@@ -40,6 +40,10 @@ int lua_producer_poll(struct lua_State *L);
 
 int lua_producer_msg_delivery_poll(struct lua_State *L);
 
+int lua_producer_poll_logs(struct lua_State *L);
+
+int lua_producer_poll_errors(struct lua_State *L);
+
 int lua_producer_produce(struct lua_State *L);
 
 int lua_producer_close(struct lua_State *L);

@@ -310,38 +310,7 @@ consumer_close(struct lua_State *L, consumer_t *consumer) {
     }
 
     if (consumer->event_queues != NULL) {
-        if (consumer->event_queues->log_queue != NULL) {
-            log_msg_t *msg = NULL;
-            while (true) {
-                msg = queue_pop(consumer->event_queues->log_queue);
-                if (msg == NULL) {
-                    break;
-                }
-                destroy_log_msg(msg);
-            }
-            destroy_queue(consumer->event_queues->log_queue);
-        }
-        if (consumer->event_queues->error_queue != NULL) {
-            error_msg_t *msg = NULL;
-            while (true) {
-                msg = queue_pop(consumer->event_queues->error_queue);
-                if (msg == NULL) {
-                    break;
-                }
-                destroy_error_msg(msg);
-            }
-            destroy_queue(consumer->event_queues->error_queue);
-        }
-
-        if (consumer->event_queues->error_cb_ref != LUA_REFNIL) {
-            luaL_unref(L, LUA_REGISTRYINDEX, consumer->event_queues->error_cb_ref);
-        }
-
-        if (consumer->event_queues->log_cb_ref != LUA_REFNIL) {
-            luaL_unref(L, LUA_REGISTRYINDEX, consumer->event_queues->log_cb_ref);
-        }
-
-        destroy_event_queues(consumer->event_queues);
+        destroy_event_queues(L, consumer->event_queues);
     }
 
     if (consumer->rd_consumer != NULL) {
