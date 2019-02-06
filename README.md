@@ -33,7 +33,15 @@ non critical errors as strings which allows you to decide how to handle it.
 ```lua
     local fiber = require('fiber')
     local os = require('os')
+    local log = require('log')
     local tnt_kafka = require('tnt-kafka')
+    
+    local error_callback = function(err)
+        log.error("got error: %s", err)
+    end
+    local log_callback = function(fac, str, level)
+        log.info("got log: %d - %s - %s", level, fac, str)
+    end
 
     local consumer, err = tnt_kafka.Consumer.create({
         brokers = "localhost:9092", -- brokers for bootstrap
@@ -43,6 +51,8 @@ non critical errors as strings which allows you to decide how to handle it.
             ["auto.offset.reset"] = "earliest",
             ["enable.partition.eof"] = "false"
         }, -- options for librdkafka
+        error_callback = error_callback, -- optional callback for errors
+        log_callback = log_callback, -- optional callback for logs and debug messages
     })
     if err ~= nil then
         print(err)
@@ -79,6 +89,12 @@ non critical errors as strings which allows you to decide how to handle it.
     
     fiber.sleep(10)
     
+    local err = consumer:unsubscribe({"test_topic"}) -- array of topics to unsubscribe
+    if err ~= nil then
+        print(err)
+        os.exit(1)
+    end
+    
     local err = consumer:close() -- always stop consumer to commit all pending offsets before app close
     if err ~= nil then
         print(err)
@@ -90,7 +106,15 @@ non critical errors as strings which allows you to decide how to handle it.
 ```lua
     local fiber = require('fiber')
     local os = require('os')
+    local log = require('log')
     local tnt_kafka = require('tnt-kafka')
+    
+    local error_callback = function(err)
+        log.error("got error: %s", err)
+    end
+    local log_callback = function(fac, str, level)
+        log.info("got log: %d - %s - %s", level, fac, str)
+    end
 
     local consumer, err = tnt_kafka.Consumer.create({
         brokers = "localhost:9092", -- brokers for bootstrap
@@ -100,6 +124,8 @@ non critical errors as strings which allows you to decide how to handle it.
             ["auto.offset.reset"] = "earliest",
             ["enable.partition.eof"] = "false"
         }, -- options for librdkafka
+        error_callback = error_callback, -- optional callback for errors
+        log_callback = log_callback, -- optional callback for logs and debug messages
     })
     if err ~= nil then
         print(err)
@@ -145,6 +171,12 @@ non critical errors as strings which allows you to decide how to handle it.
     
     fiber.sleep(10)
     
+    local err = consumer:unsubscribe({"test_topic"}) -- array of topics to unsubscribe
+    if err ~= nil then
+        print(err)
+        os.exit(1)
+    end
+    
     local err = consumer:close() -- always stop consumer to commit all pending offsets before app close
     if err ~= nil then
         print(err)
@@ -158,11 +190,21 @@ non critical errors as strings which allows you to decide how to handle it.
 
 ```lua
     local os = require('os')
+    local log = require('log')
     local tnt_kafka = require('tnt-kafka')
+    
+    local error_callback = function(err)
+        log.error("got error: %s", err)
+    end
+    local log_callback = function(fac, str, level)
+        log.info("got log: %d - %s - %s", level, fac, str)
+    end
     
     local producer, err = tnt_kafka.Producer.create({
         brokers = "kafka:9092", -- brokers for bootstrap
-        options = {} -- options for librdkafka
+        options = {}, -- options for librdkafka
+        error_callback = error_callback, -- optional callback for errors
+        log_callback = log_callback, -- optional callback for logs and debug messages
     })
     if err ~= nil then
         print(err)
@@ -192,11 +234,21 @@ non critical errors as strings which allows you to decide how to handle it.
 ```lua
     local fiber = require('fiber')
     local os = require('os')
+    local log = require('log')
     local tnt_kafka = require('tnt-kafka')
+    
+    local error_callback = function(err)
+        log.error("got error: %s", err)
+    end
+    local log_callback = function(fac, str, level)
+        log.info("got log: %d - %s - %s", level, fac, str)
+    end
     
     local producer, err = tnt_kafka.Producer.create({
         brokers = "kafka:9092", -- brokers for bootstrap
-        options = {} -- options for librdkafka
+        options = {}, -- options for librdkafka
+        error_callback = error_callback, -- optional callback for errors
+        log_callback = log_callback, -- optional callback for logs and debug messages
     })
     if err ~= nil then
         print(err)
