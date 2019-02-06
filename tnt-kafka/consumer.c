@@ -341,7 +341,7 @@ consumer_close(struct lua_State *L, consumer_t *consumer) {
             luaL_unref(L, LUA_REGISTRYINDEX, consumer->event_queues->log_cb_ref);
         }
 
-        free(consumer->event_queues);
+        destroy_event_queues(consumer->event_queues);
     }
 
     if (consumer->rd_consumer != NULL) {
@@ -410,35 +410,27 @@ lua_create_consumer(struct lua_State *L) {
         return fail ? lua_push_error(L): 2;
     }
 
-    int error_cb_ref = LUA_REFNIL;
-    queue_t *error_queue = NULL;
+    event_queues_t *event_queues = new_event_queues();
+
     lua_pushstring(L, "error_callback");
     lua_gettable(L, -2 );
     if (lua_isfunction(L, -1)) {
-        error_cb_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        error_queue = new_queue();
+        event_queues->error_cb_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+        event_queues->error_queue = new_queue();
         rd_kafka_conf_set_error_cb(rd_config, error_callback);
     } else {
         lua_pop(L, 1);
     }
 
-    int log_cb_ref = LUA_REFNIL;
-    queue_t *log_queue = NULL;
     lua_pushstring(L, "log_callback");
     lua_gettable(L, -2 );
     if (lua_isfunction(L, -1)) {
-        log_cb_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        log_queue = new_queue();
+        event_queues->log_cb_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+        event_queues->log_queue = new_queue();
         rd_kafka_conf_set_log_cb(rd_config, log_callback);
     } else {
         lua_pop(L, 1);
     }
-
-    event_queues_t *event_queues = malloc(sizeof(event_queues_t));
-    event_queues->error_queue = error_queue;
-    event_queues->error_cb_ref = error_cb_ref;
-    event_queues->log_queue = log_queue;
-    event_queues->log_cb_ref = log_cb_ref;
 
     rd_kafka_conf_set_opaque(rd_config, event_queues);
 

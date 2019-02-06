@@ -37,6 +37,19 @@ destroy_log_msg(log_msg_t *msg) {
     free(msg);
 }
 
+void
+log_callback(const rd_kafka_t *rd_kafka, int level, const char *fac, const char *buf) {
+    event_queues_t *event_queues = rd_kafka_opaque(rd_kafka);
+    if (event_queues != NULL && event_queues->log_queue != NULL) {
+        log_msg_t *msg = new_log_msg(level, fac, buf);
+        if (msg != NULL) {
+            if (queue_push(event_queues->log_queue, msg) != 0) {
+                destroy_log_msg(msg);
+            }
+        }
+    }
+}
+
 error_msg_t *
 new_error_msg(int err, const char *reason) {
     error_msg_t *msg = malloc(sizeof(error_msg_t));
@@ -58,19 +71,6 @@ destroy_error_msg(error_msg_t *msg) {
 }
 
 void
-log_callback(const rd_kafka_t *rd_kafka, int level, const char *fac, const char *buf) {
-    event_queues_t *event_queues = rd_kafka_opaque(rd_kafka);
-    if (event_queues != NULL && event_queues->log_queue != NULL) {
-        log_msg_t *msg = new_log_msg(level, fac, buf);
-        if (msg != NULL) {
-            if (queue_push(event_queues->log_queue, msg) != 0) {
-                destroy_log_msg(msg);
-            }
-        }
-    }
-}
-
-void
 error_callback(rd_kafka_t *UNUSED(rd_kafka), int err, const char *reason, void *opaque) {
     event_queues_t *event_queues = opaque;
     if (event_queues != NULL && event_queues->error_queue != NULL) {
@@ -81,4 +81,46 @@ error_callback(rd_kafka_t *UNUSED(rd_kafka), int err, const char *reason, void *
             }
         }
     }
+}
+
+dr_msg_t *
+new_dr_msg(int dr_callback, int err) {
+    dr_msg_t *dr_msg;
+    dr_msg = malloc(sizeof(dr_msg_t));
+    dr_msg->dr_callback = dr_callback;
+    dr_msg->err = err;
+    return dr_msg;
+}
+
+void
+destroy_dr_msg(dr_msg_t *dr_msg) {
+    free(dr_msg);
+}
+
+void
+msg_delivery_callback(rd_kafka_t *UNUSED(producer), const rd_kafka_message_t *msg, void *opaque) {
+    event_queues_t *event_queues = opaque;
+    if (msg->_private != NULL && event_queues != NULL && event_queues->delivery_queue != NULL) {
+        dr_msg_t *dr_msg = msg->_private;
+        if (dr_msg != NULL) {
+            if (msg->err != RD_KAFKA_RESP_ERR_NO_ERROR) {
+                dr_msg->err = msg->err;
+            }
+            queue_push(event_queues->delivery_queue, dr_msg);
+        }
+    }
+}
+
+event_queues_t *new_event_queues() {
+    event_queues_t *event_queues = malloc(sizeof(event_queues_t));
+    event_queues->error_queue = NULL;
+    event_queues->error_cb_ref = LUA_REFNIL;
+    event_queues->log_queue = NULL;
+    event_queues->log_cb_ref = LUA_REFNIL;
+    event_queues->delivery_queue = NULL;
+    return event_queues;
+}
+
+void destroy_event_queues(event_queues_t *event_queues) {
+    free(event_queues);
 }

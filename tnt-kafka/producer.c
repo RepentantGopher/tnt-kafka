@@ -68,20 +68,6 @@ destroy_producer_topics(producer_topics_t *topics) {
     free(topics);
 }
 
-queue_element_t *
-new_queue_element(int dr_callback, int err) {
-    queue_element_t *element;
-    element = malloc(sizeof(queue_element_t));
-    element->dr_callback = dr_callback;
-    element->err = err;
-    return element;
-}
-
-void
-destroy_queue_element(queue_element_t *element) {
-    free(element);
-}
-
 static inline producer_t *
 lua_check_producer(struct lua_State *L, int index) {
     producer_t **producer_p = (producer_t **)luaL_checkudata(L, index, producer_label);
@@ -127,19 +113,19 @@ lua_producer_msg_delivery_poll(struct lua_State *L) {
     int events_limit = lua_tonumber(L, 2);
     int callbacks_count = 0;
     char *err_str = NULL;
-    queue_element_t *element = NULL;
+    dr_msg_t *dr_msg = NULL;
 
-    pthread_mutex_lock(&producer->delivery_queue->lock);
+    pthread_mutex_lock(&producer->event_queues->delivery_queue->lock);
 
     while (events_limit > callbacks_count) {
-        element = queue_lockfree_pop(producer->delivery_queue);
-        if (element == NULL) {
+        dr_msg = queue_lockfree_pop(producer->event_queues->delivery_queue);
+        if (dr_msg == NULL) {
             break;
         }
         callbacks_count += 1;
-        lua_rawgeti(L, LUA_REGISTRYINDEX, element->dr_callback);
-        if (element->err != RD_KAFKA_RESP_ERR_NO_ERROR) {
-            lua_pushstring(L, (char *)rd_kafka_err2str(element->err));
+        lua_rawgeti(L, LUA_REGISTRYINDEX, dr_msg->dr_callback);
+        if (dr_msg->err != RD_KAFKA_RESP_ERR_NO_ERROR) {
+            lua_pushstring(L, (char *)rd_kafka_err2str(dr_msg->err));
         } else {
             lua_pushnil(L);
         }
@@ -147,14 +133,14 @@ lua_producer_msg_delivery_poll(struct lua_State *L) {
         if (lua_pcall(L, 1, 0, 0) != 0) {
             err_str = (char *)lua_tostring(L, -1);
         }
-        luaL_unref(L, LUA_REGISTRYINDEX, element->dr_callback);
-        destroy_queue_element(element);
+        luaL_unref(L, LUA_REGISTRYINDEX, dr_msg->dr_callback);
+        destroy_dr_msg(dr_msg);
         if (err_str != NULL) {
             break;
         }
     }
 
-    pthread_mutex_unlock(&producer->delivery_queue->lock);
+    pthread_mutex_unlock(&producer->event_queues->delivery_queue->lock);
 
     lua_pushnumber(L, (double)callbacks_count);
     if (err_str != NULL) {
@@ -204,12 +190,12 @@ lua_producer_produce(struct lua_State *L) {
     }
 
     // create delivery callback queue if got msg id
-    queue_element_t *element = NULL;
+    dr_msg_t *dr_msg = NULL;
     lua_pushstring(L, "dr_callback");
     lua_gettable(L, -2 );
     if (lua_isfunction(L, -1)) {
-        element = new_queue_element(luaL_ref(L, LUA_REGISTRYINDEX), RD_KAFKA_RESP_ERR_NO_ERROR);
-        if (element == NULL) {
+        dr_msg = new_dr_msg(luaL_ref(L, LUA_REGISTRYINDEX), RD_KAFKA_RESP_ERR_NO_ERROR);
+        if (dr_msg == NULL) {
             int fail = safe_pushstring(L, "failed to create callback message");
             return fail ? lua_push_error(L): 1;
         }
@@ -237,7 +223,7 @@ lua_producer_produce(struct lua_State *L) {
         }
     }
 
-    if (rd_kafka_produce(rd_topic, -1, RD_KAFKA_MSG_F_COPY, value, value_len, key, key_len, element) == -1) {
+    if (rd_kafka_produce(rd_topic, -1, RD_KAFKA_MSG_F_COPY, value, value_len, key, key_len, dr_msg) == -1) {
         const char *const_err_str = rd_kafka_err2str(rd_kafka_errno2err(errno));
         char err_str[512];
         strcpy(err_str, const_err_str);
@@ -272,8 +258,19 @@ producer_close(producer_t *producer) {
         destroy_producer_topics(producer->topics);
     }
 
-    if (producer->delivery_queue != NULL) {
-        destroy_queue(producer->delivery_queue);
+    if (producer->event_queues != NULL) {
+        if (producer->event_queues->delivery_queue != NULL) {
+            dr_msg_t *msg = NULL;
+            while (true) {
+                msg = queue_pop(producer->event_queues->delivery_queue);
+                if (msg == NULL) {
+                    break;
+                }
+                destroy_dr_msg(msg);
+            }
+            destroy_queue(producer->event_queues->delivery_queue);
+        }
+        destroy_event_queues(producer->event_queues);
     }
 
     if (producer->rd_producer != NULL) {
@@ -321,20 +318,6 @@ lua_producer_gc(struct lua_State *L) {
     return 0;
 }
 
-void
-msg_delivery_callback(rd_kafka_t *UNUSED(producer), const rd_kafka_message_t *msg, void *opaque) {
-    if (msg->_private != NULL) {
-        queue_element_t *element = msg->_private;
-        queue_t *queue = opaque;
-        if (element != NULL) {
-            if (msg->err != RD_KAFKA_RESP_ERR_NO_ERROR) {
-                element->err = msg->err;
-            }
-            queue_push(queue, element);
-        }
-    }
-}
-
 int
 lua_create_producer(struct lua_State *L) {
     if (lua_gettop(L) != 1 || !lua_istable(L, 1))
@@ -354,14 +337,10 @@ lua_create_producer(struct lua_State *L) {
 
     rd_kafka_conf_t *rd_config = rd_kafka_conf_new();
 
-    queue_t *delivery_queue = new_queue();
-    // queue now accessible from callback
-    rd_kafka_conf_set_opaque(rd_config, delivery_queue);
-
+    event_queues_t *event_queues = new_event_queues();
+    event_queues->delivery_queue = new_queue();
     rd_kafka_conf_set_dr_msg_cb(rd_config, msg_delivery_callback);
-
-    // enabling delivering events
-//    rd_kafka_conf_set_events(rd_config, RD_KAFKA_EVENT_STATS | RD_KAFKA_EVENT_DR);
+    rd_kafka_conf_set_opaque(rd_config, event_queues);
 
     lua_pushstring(L, "options");
     lua_gettable(L, -2 );
@@ -409,7 +388,7 @@ lua_create_producer(struct lua_State *L) {
     producer = malloc(sizeof(producer_t));
     producer->rd_producer = rd_producer;
     producer->topics = new_producer_topics(256);
-    producer->delivery_queue = delivery_queue;
+    producer->event_queues = event_queues;
 
     producer_t **producer_p = (producer_t **)lua_newuserdata(L, sizeof(producer));
     *producer_p = producer;

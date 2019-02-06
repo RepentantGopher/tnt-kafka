@@ -7,6 +7,8 @@
 
 #include <librdkafka/rdkafka.h>
 
+#include <queue.h>
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /**
  * Producer
@@ -26,21 +28,9 @@ rd_kafka_topic_t *find_producer_topic_by_name(producer_topics_t *topics, const c
 
 void destroy_producer_topics(producer_topics_t *topics);
 
-// Cause `rd_kafka_conf_set_events(rd_config, RD_KAFKA_EVENT_DR)` produces segfault with queue api, we are forced to
-// implement our own thread safe queue to push incoming events from callback thread to lua thread.
-typedef struct {
-    int dr_callback;
-    int err;
-} queue_element_t;
-
-queue_element_t *new_queue_element(int dr_callback, int err);
-
-void destroy_queue_element(queue_element_t *element);
-
 typedef struct {
     rd_kafka_t        *rd_producer;
     producer_topics_t *topics;
-    queue_t           *delivery_queue;
     event_queues_t    *event_queues;
 } producer_t;
 
