@@ -1,4 +1,6 @@
-add_library(tntkafka SHARED tnt_kafka.c )
+include_directories(${CMAKE_SOURCE_DIR}/tnt-kafka)
+
+add_library(tntkafka SHARED tnt_kafka.c callbacks.c consumer.c consumer_msg.c producer.c queue.c common.c)
 
 if (APPLE)
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} \

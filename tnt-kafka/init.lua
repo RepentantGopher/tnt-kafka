@@ -31,6 +31,18 @@ function Consumer.create(config)
         new:_poll_msg()
     end)
 
+    if config.log_callback ~= nil then
+        new._poll_logs_fiber = fiber.create(function()
+            new:_poll_logs()
+        end)
+    end
+
+    if config.error_callback ~= nil then
+        new._poll_errors_fiber = fiber.create(function()
+            new:_poll_errors()
+        end)
+    end
+
     return new, nil
 end
 
@@ -64,9 +76,53 @@ end
 
 jit.off(Consumer._poll_msg)
 
+function Consumer:_poll_logs()
+    local count, err
+    while true do
+        count, err = self._consumer:poll_logs(100)
+        if err ~= nil then
+            log.error("Consumer poll logs error: %s", err)
+            -- throtling poll
+            fiber.sleep(0.1)
+        elseif count > 0 then
+            fiber.yield()
+        else
+            -- throtling poll
+            fiber.sleep(1)
+        end
+    end
+end
+
+jit.off(Consumer._poll_logs)
+
+function Consumer:_poll_errors()
+    local count, err
+    while true do
+        count, err = self._consumer:poll_errors(100)
+        if err ~= nil then
+            log.error("Consumer poll errors error: %s", err)
+            -- throtling poll
+            fiber.sleep(0.1)
+        elseif count > 0 then
+            fiber.yield()
+        else
+            -- throtling poll
+            fiber.sleep(1)
+        end
+    end
+end
+
+jit.off(Consumer._poll_errors)
+
 function Consumer:close()
     self._poll_msg_fiber:cancel()
     self._poll_fiber:cancel()
+    if self._poll_logs_fiber ~= nil then
+        self._poll_logs_fiber:cancel()
+    end
+    if self._poll_errors_fiber ~= nil then
+        self._poll_errors_fiber:cancel()
+    end
     self._output_ch:close()
 
     local ok, err = self._consumer:close()
@@ -77,6 +133,10 @@ end
 
 function Consumer:subscribe(topics)
     return self._consumer:subscribe(topics)
+end
+
+function Consumer:unsubscribe(topics)
+    return self._consumer:unsubscribe(topics)
 end
 
 function Consumer:output()
@@ -117,6 +177,18 @@ function Producer.create(config)
         new:_msg_delivery_poll()
     end)
 
+    if config.log_callback ~= nil then
+        new._poll_logs_fiber = fiber.create(function()
+            new:_poll_logs()
+        end)
+    end
+
+    if config.error_callback ~= nil then
+        new._poll_errors_fiber = fiber.create(function()
+            new:_poll_errors()
+        end)
+    end
+
     return new, nil
 end
 
@@ -154,6 +226,44 @@ end
 
 jit.off(Producer._msg_delivery_poll)
 
+function Producer:_poll_logs()
+    local count, err
+    while true do
+        count, err = self._producer:poll_logs(100)
+        if err ~= nil then
+            log.error("Producer poll logs error: %s", err)
+            -- throtling poll
+            fiber.sleep(0.1)
+        elseif count > 0 then
+            fiber.yield()
+        else
+            -- throtling poll
+            fiber.sleep(1)
+        end
+    end
+end
+
+jit.off(Producer._poll_logs)
+
+function Producer:_poll_errors()
+    local count, err
+    while true do
+        count, err = self._producer:poll_errors(100)
+        if err ~= nil then
+            log.error("Producer poll errors error: %s", err)
+            -- throtling poll
+            fiber.sleep(0.1)
+        elseif count > 0 then
+            fiber.yield()
+        else
+            -- throtling poll
+            fiber.sleep(1)
+        end
+    end
+end
+
+jit.off(Producer._poll_errors)
+
 function Producer:produce_async(msg)
     local err = self._producer:produce(msg)
     return err
@@ -181,6 +291,12 @@ end
 function Producer:close()
     self._poll_fiber:cancel()
     self._msg_delivery_poll_fiber:cancel()
+    if self._poll_logs_fiber ~= nil then
+        self._poll_logs_fiber:cancel()
+    end
+    if self._poll_errors_fiber ~= nil then
+        self._poll_errors_fiber:cancel()
+    end
 
     local ok, err = self._producer:close()
     self._producer = nil

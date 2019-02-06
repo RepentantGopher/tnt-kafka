@@ -34,25 +34,12 @@ docker-run-kafka: docker-remove-kafka
         -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
         wurstmeister/kafka
 
-docker-create-test-topic:
-	docker run \
-		--net=${NETWORK} \
-		--rm confluentinc/cp-kafka:5.0.0 \
-		kafka-topics --create --topic test_producer --partitions 1 --replication-factor 1 \
-		--if-not-exists --zookeeper zookeeper:2181
-
-	docker run \
-		--net=${NETWORK} \
-		--rm confluentinc/cp-kafka:5.0.0 \
-		kafka-topics --create --topic test_consumer --partitions 1 --replication-factor 1 \
-		--if-not-exists --zookeeper zookeeper:2181
-
 docker-read-topic-data:
 	docker run \
       --net=${NETWORK} \
       --rm \
       confluentinc/cp-kafka:5.0.0 \
-      kafka-console-consumer --bootstrap-server kafka:9092 --topic test_producer --from-beginning
+      kafka-console-consumer --bootstrap-server kafka:9092 --topic test_partially_unsubscribe_1 --from-beginning
 
 APP_NAME = kafka-test
 APP_IMAGE = kafka-test-image
@@ -117,15 +104,45 @@ test-run-with-docker: tests-dep docker-run-all
 	sleep 5
 
 	docker run \
+    		--net=${NETWORK} \
+    		--rm confluentinc/cp-kafka:5.0.0 \
+    		kafka-topics --create --topic test_producer --partitions 1 --replication-factor 1 \
+    		--if-not-exists --zookeeper zookeeper:2181
+
+	docker run \
 		--net=${NETWORK} \
 		--rm confluentinc/cp-kafka:5.0.0 \
-		kafka-topics --create --topic test_producer --partitions 1 --replication-factor 1 \
+		kafka-topics --create --topic test_consume --partitions 1 --replication-factor 1 \
 		--if-not-exists --zookeeper zookeeper:2181
 
 	docker run \
 		--net=${NETWORK} \
 		--rm confluentinc/cp-kafka:5.0.0 \
-		kafka-topics --create --topic test_consumer --partitions 1 --replication-factor 1 \
+		kafka-topics --create --topic test_unsubscribe --partitions 1 --replication-factor 1 \
+		--if-not-exists --zookeeper zookeeper:2181
+
+	docker run \
+		--net=${NETWORK} \
+		--rm confluentinc/cp-kafka:5.0.0 \
+		kafka-topics --create --topic test_unsub_partially_1 --partitions 1 --replication-factor 1 \
+		--if-not-exists --zookeeper zookeeper:2181
+
+	docker run \
+		--net=${NETWORK} \
+		--rm confluentinc/cp-kafka:5.0.0 \
+		kafka-topics --create --topic test_unsub_partially_2 --partitions 1 --replication-factor 1 \
+		--if-not-exists --zookeeper zookeeper:2181
+
+	docker run \
+		--net=${NETWORK} \
+		--rm confluentinc/cp-kafka:5.0.0 \
+		kafka-topics --create --topic test_multi_consume_1 --partitions 1 --replication-factor 1 \
+		--if-not-exists --zookeeper zookeeper:2181
+
+	docker run \
+		--net=${NETWORK} \
+		--rm confluentinc/cp-kafka:5.0.0 \
+		kafka-topics --create --topic test_multi_consume_2 --partitions 1 --replication-factor 1 \
 		--if-not-exists --zookeeper zookeeper:2181
 
 	cd ./tests && \
