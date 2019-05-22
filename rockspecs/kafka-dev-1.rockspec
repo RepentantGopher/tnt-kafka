@@ -1,8 +1,8 @@
-package = "tnt-kafka"
-version = "0.4.0-1"
+package = "kafka"
+version = "dev-1"
 source = {
     url = "git://github.com/tarantool/tnt-kafka.git",
-    tag = "v0.4.0",
+    branch = 'dev',
 }
 description = {
     summary = "Kafka library for Tarantool",

@@ -1,4 +1,4 @@
-package = "tnt-kafka"
+package = "kafka"
 version = "scm-1"
 source = {
     url = "git://github.com/tarantool/tnt-kafka.git",

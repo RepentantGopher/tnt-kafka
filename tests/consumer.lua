@@ -2,7 +2,7 @@ local box = require("box")
 local log = require("log")
 local os = require("os")
 local fiber = require('fiber')
-local tnt_kafka = require('tnt-kafka')
+local tnt_kafka = require('kafka')
 
 local consumer = nil
 local errors = {}

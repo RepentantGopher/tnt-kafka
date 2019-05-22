@@ -3,7 +3,7 @@ local box = require('box')
 local os = require('os')
 local log = require('log')
 local clock = require('clock')
-local tnt_kafka = require('tnt-kafka')
+local tnt_kafka = require('kafka')
 
 box.cfg{}
 

@@ -1,5 +1,5 @@
-tnt-kafka
-=========
+Tarantool kafka
+===============
 Full featured high performance kafka library for Tarantool based on [librdkafka](https://github.com/edenhill/librdkafka). 
 
 Can produce more then 150k messages per second and consume more then 140k messages per second.
@@ -8,7 +8,7 @@ Can produce more then 150k messages per second and consume more then 140k messag
 * Kafka producer and consumer implementations.
 * Fiber friendly.
 * Mostly errorless functions and methods. Error handling in Tarantool ecosystem is quite a mess, 
-some libraries throws lua native `error` while others throws `box.error` instead. `tnt-kafka` returns 
+some libraries throws lua native `error` while others throws `box.error` instead. `kafka` returns 
 non critical errors as strings which allows you to decide how to handle it.
 
 # Requirements 
@@ -22,7 +22,7 @@ non critical errors as strings which allows you to decide how to handle it.
 
 # Installation
 ```bash
-    tarantoolctl rocks install https://raw.githubusercontent.com/tarantool/tnt-kafka/master/rockspecs/tnt-kafka-scm-1.rockspec
+    tarantoolctl rocks install https://raw.githubusercontent.com/tarantool/tnt-kafka/master/rockspecs/kafka-scm-1.rockspec
 ```
 
 # Examples
@@ -34,7 +34,7 @@ non critical errors as strings which allows you to decide how to handle it.
     local fiber = require('fiber')
     local os = require('os')
     local log = require('log')
-    local tnt_kafka = require('tnt-kafka')
+    local tnt_kafka = require('kafka')
     
     local error_callback = function(err)
         log.error("got error: %s", err)
@@ -110,7 +110,7 @@ non critical errors as strings which allows you to decide how to handle it.
     local fiber = require('fiber')
     local os = require('os')
     local log = require('log')
-    local tnt_kafka = require('tnt-kafka')
+    local tnt_kafka = require('kafka')
     
     local error_callback = function(err)
         log.error("got error: %s", err)
@@ -197,7 +197,7 @@ non critical errors as strings which allows you to decide how to handle it.
 ```lua
     local os = require('os')
     local log = require('log')
-    local tnt_kafka = require('tnt-kafka')
+    local tnt_kafka = require('kafka')
     
     local error_callback = function(err)
         log.error("got error: %s", err)
@@ -244,7 +244,7 @@ non critical errors as strings which allows you to decide how to handle it.
     local fiber = require('fiber')
     local os = require('os')
     local log = require('log')
-    local tnt_kafka = require('tnt-kafka')
+    local tnt_kafka = require('kafka')
     
     local error_callback = function(err)
         log.error("got error: %s", err)
@@ -298,7 +298,6 @@ because `rd_kafka_destroy` sometimes hangs forever.
 
 # TODO
 * Ordered storage for offsets to prevent commits unprocessed messages
-* Add poll call for librdkafka logs and errors
 * Fix known issues
 * More examples
 * Better documentation

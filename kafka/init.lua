@@ -1,6 +1,6 @@
 local log = require("log")
 local fiber = require('fiber')
-local tnt_kafka = require("tnt-kafka.tntkafka")
+local tnt_kafka = require("kafka.tntkafka")
 
 local Consumer = {}
 
