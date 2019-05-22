@@ -6,8 +6,14 @@ find_path(RDKAFKA_INCLUDE_DIR
         NAMES librdkafka/rdkafka.h
         HINTS ${RDKAFKA_ROOT_DIR}/include
         )
+
 find_library(RDKAFKA_LIBRARY
         NAMES ${CMAKE_SHARED_LIBRARY_PREFIX}rdkafka${CMAKE_SHARED_LIBRARY_SUFFIX} rdkafka
+        HINTS ${RDKAFKA_ROOT_DIR}/lib
+        )
+
+find_library(RDKAFKA_STATIC
+        NAMES ${CMAKE_STATIC_LIBRARY_PREFIX}rdkafka${CMAKE_STATIC_LIBRARY_SUFFIX} rdkafka
         HINTS ${RDKAFKA_ROOT_DIR}/lib
         )
 

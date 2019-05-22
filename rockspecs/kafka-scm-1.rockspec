@@ -15,9 +15,6 @@ dependencies = {
 external_dependencies = {
     TARANTOOL = {
         header = 'tarantool/module.h'
-    },
-    RDKAFKA = {
-        header = 'librdkafka/rdkafka.h'
     }
 }
 build = {
