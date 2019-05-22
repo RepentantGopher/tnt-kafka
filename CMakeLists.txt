@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8 FATAL_ERROR)
 
-project(tnt-kafka C)
+project(kafka C)
 
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 
@@ -22,4 +22,4 @@ find_package(RdKafka)
 
 include_directories(${TARANTOOL_INCLUDE_DIRS})
 
-add_subdirectory(tnt-kafka)
+add_subdirectory(kafka)

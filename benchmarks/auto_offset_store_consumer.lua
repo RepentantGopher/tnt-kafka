@@ -3,7 +3,7 @@ local log = require('log')
 local box = require('box')
 local os = require('os')
 local clock = require('clock')
-local tnt_kafka = require('tnt-kafka')
+local tnt_kafka = require('kafka')
 
 box.cfg{
     memtx_memory = 524288000, -- 500 MB
