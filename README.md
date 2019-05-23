@@ -25,6 +25,14 @@ non critical errors as strings which allows you to decide how to handle it.
     tarantoolctl rocks install https://raw.githubusercontent.com/tarantool/tnt-kafka/master/rockspecs/kafka-scm-1.rockspec
 ```
 
+## Build module with statically linked librdkafka
+
+To install kafka module with builtin librdkafka dependency, use option `BUNDLE_RDKAFKA`:
+
+```bash
+tarantoolctl rocks BUNDLE_RDKAFKA=ON install https://raw.githubusercontent.com/tarantool/tnt-kafka/master/rockspecs/tnt-kafka-scm-1.rockspec
+```
+
 # Examples
 
 ## Consumer
