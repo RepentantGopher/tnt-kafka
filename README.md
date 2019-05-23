@@ -27,10 +27,10 @@ non critical errors as strings which allows you to decide how to handle it.
 
 ## Build module with statically linked librdkafka
 
-To install kafka module with builtin librdkafka dependency, use option `BUNDLE_RDKAFKA`:
+To install kafka module with builtin librdkafka dependency, use option `STATIC_BUILD`:
 
 ```bash
-tarantoolctl rocks BUNDLE_RDKAFKA=ON install https://raw.githubusercontent.com/tarantool/tnt-kafka/master/rockspecs/tnt-kafka-scm-1.rockspec
+tarantoolctl rocks STATIC_BUILD=ON install https://raw.githubusercontent.com/tarantool/tnt-kafka/master/rockspecs/tnt-kafka-scm-1.rockspec
 ```
 
 # Examples

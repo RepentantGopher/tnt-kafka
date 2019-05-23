@@ -17,7 +17,7 @@ if(${tntver} VERSION_LESS 1.7.4.291)
     message(FATAL_ERROR "Tarantool >= 1.7.4-291 is required")
 endif()
 
-if(BUNDLE_RDKAFKA)
+if(STATIC_BUILD)
     include(buildRdKafka)
     buildrdkafka()
 else()
