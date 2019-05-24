@@ -22,7 +22,7 @@ non critical errors as strings which allows you to decide how to handle it.
 
 # Installation
 ```bash
-    tarantoolctl rocks install https://raw.githubusercontent.com/tarantool/tnt-kafka/master/rockspecs/kafka-scm-1.rockspec
+    tarantoolctl rocks install https://raw.githubusercontent.com/tarantool/kafka/master/rockspecs/kafka-scm-1.rockspec
 ```
 
 ## Build module with statically linked librdkafka
@@ -30,7 +30,7 @@ non critical errors as strings which allows you to decide how to handle it.
 To install kafka module with builtin librdkafka dependency, use option `STATIC_BUILD`:
 
 ```bash
-tarantoolctl rocks STATIC_BUILD=ON install https://raw.githubusercontent.com/tarantool/tnt-kafka/master/rockspecs/tnt-kafka-scm-1.rockspec
+tarantoolctl rocks STATIC_BUILD=ON install https://raw.githubusercontent.com/tarantool/kafka/master/rockspecs/kafka-scm-1.rockspec
 ```
 
 # Examples
