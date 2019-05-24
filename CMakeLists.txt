@@ -17,8 +17,13 @@ if(${tntver} VERSION_LESS 1.7.4.291)
     message(FATAL_ERROR "Tarantool >= 1.7.4-291 is required")
 endif()
 
-set(RDKAFKA_FIND_REQUIRED ON)
-find_package(RdKafka)
+if(STATIC_BUILD)
+    include(buildRdKafka)
+    buildrdkafka()
+else()
+    set(RDKAFKA_FIND_REQUIRED ON)
+    find_package(RdKafka)
+endif()
 
 include_directories(${TARANTOOL_INCLUDE_DIRS})
 

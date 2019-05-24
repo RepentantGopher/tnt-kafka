@@ -7,8 +7,16 @@ if (APPLE)
         -undefined suppress -flat_namespace")
 endif(APPLE)
 
-target_link_libraries(tntkafka ${RDKAFKA_LIBRARY} pthread)
+target_link_libraries(tntkafka pthread)
+
+if (STATIC_BUILD)
+	add_dependencies(tntkafka rdkafka)
+	target_link_libraries(tntkafka ${CMAKE_SOURCE_DIR}/librdkafka/src/librdkafka.a)
+else()
+	target_link_libraries(tntkafka ${RDKAFKA_LIBRARY})
+endif()
 
 set_target_properties(tntkafka PROPERTIES PREFIX "" OUTPUT_NAME "tntkafka")
+
 install(TARGETS tntkafka LIBRARY DESTINATION ${TARANTOOL_INSTALL_LIBDIR}/kafka)
 install(FILES init.lua DESTINATION ${TARANTOOL_INSTALL_LUADIR}/kafka)

@@ -15,9 +15,6 @@ dependencies = {
 external_dependencies = {
     TARANTOOL = {
         header = 'tarantool/module.h'
-    },
-    RDKAFKA = {
-        header = 'librdkafka/rdkafka.h'
     }
 }
 build = {
@@ -26,6 +23,7 @@ build = {
         CMAKE_BUILD_TYPE="RelWithDebInfo",
         TARANTOOL_DIR="$(TARANTOOL_DIR)",
         TARANTOOL_INSTALL_LIBDIR="$(LIBDIR)",
-        TARANTOOL_INSTALL_LUADIR="$(LUADIR)"
+        TARANTOOL_INSTALL_LUADIR="$(LUADIR)",
+        STATIC_BUILD="$(STATIC_BUILD)"
     }
 }
