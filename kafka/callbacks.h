@@ -1,6 +1,8 @@
 #ifndef TNT_KAFKA_CALLBACKS_H
 #define TNT_KAFKA_CALLBACKS_H
 
+#include <pthread.h>
+
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
@@ -12,6 +14,10 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /**
  * Common callbacks handling
+ */
+
+/**
+ * Handle logs from RDKafka
  */
 
 typedef struct {
@@ -26,6 +32,11 @@ void destroy_log_msg(log_msg_t *msg);
 
 void log_callback(const rd_kafka_t *rd_kafka, int level, const char *fac, const char *buf);
 
+
+/**
+ * Handle errors from RDKafka
+ */
+
 typedef struct {
     int err;
     char *reason;
@@ -36,6 +47,11 @@ error_msg_t *new_error_msg(int err, const char *reason);
 void destroy_error_msg(error_msg_t *msg);
 
 void error_callback(rd_kafka_t *UNUSED(rd_kafka), int err, const char *reason, void *opaque);
+
+
+/**
+ * Handle message delivery reports from RDKafka
+ */
 
 typedef struct {
     int dr_callback;
@@ -48,12 +64,43 @@ void destroy_dr_msg(dr_msg_t *dr_msg);
 
 void msg_delivery_callback(rd_kafka_t *UNUSED(producer), const rd_kafka_message_t *msg, void *opaque);
 
+
+/**
+ * Handle rebalance callbacks from RDKafka
+ */
+
+typedef struct {
+    pthread_mutex_t                  lock;
+    pthread_cond_t                   sync;
+    rd_kafka_topic_partition_list_t *revoked;
+    rd_kafka_topic_partition_list_t *assigned;
+    rd_kafka_resp_err_t              err;
+} rebalance_msg_t;
+
+rebalance_msg_t *new_rebalance_revoke_msg(rd_kafka_topic_partition_list_t *revoked);
+
+rebalance_msg_t *new_rebalance_assign_msg(rd_kafka_topic_partition_list_t *assigned);
+
+rebalance_msg_t *new_rebalance_error_msg(rd_kafka_resp_err_t err);
+
+void destroy_rebalance_msg(rebalance_msg_t *rebalance_msg);
+
+void rebalance_callback(rd_kafka_t *consumer, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *partitions, void *opaque);
+
+
+/**
+ * Structure which contains all queues for communication between main TX thread and
+ * RDKafka callbacks from background threads
+ */
+
 typedef struct {
     queue_t *log_queue;
-    int log_cb_ref;
+    int      log_cb_ref;
     queue_t *error_queue;
-    int error_cb_ref;
+    int      error_cb_ref;
     queue_t *delivery_queue;
+    queue_t *rebalance_queue;
+    int      rebalance_cb_ref;
 } event_queues_t;
 
 event_queues_t *new_event_queues();

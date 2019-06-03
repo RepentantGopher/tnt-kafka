@@ -1,4 +1,5 @@
 local box = require("box")
+local json = require("json")
 local log = require("log")
 local os = require("os")
 local fiber = require('fiber')
@@ -7,6 +8,7 @@ local tnt_kafka = require('kafka')
 local consumer = nil
 local errors = {}
 local logs = {}
+local rebalances = {}
 
 local function create(brokers, additional_opts)
     local err
@@ -19,6 +21,11 @@ local function create(brokers, additional_opts)
     local log_callback = function(fac, str, level)
         log.info("got log: %d - %s - %s", level, fac, str)
         table.insert(logs, string.format("got log: %d - %s - %s", level, fac, str))
+    end
+
+    local rebalance_callback = function(msg)
+        log.info("got rebalance msg: %s", json.decode(msg))
+        table.insert(rebalances, msg)
     end
 
     local options = {
@@ -38,6 +45,7 @@ local function create(brokers, additional_opts)
         options = options,
         error_callback = error_callback,
         log_callback = log_callback,
+        rebalance_callback = rebalance_callback,
         default_topic_options = {
             ["auto.offset.reset"] = "earliest",
         },
@@ -112,6 +120,10 @@ local function get_logs()
     return logs
 end
 
+local function get_rebalances()
+    return rebalances
+end
+
 local function close()
     log.info("closing consumer")
     local exists, err = consumer:close()
@@ -130,4 +142,5 @@ return {
     close = close,
     get_errors = get_errors,
     get_logs = get_logs,
+    get_rebalances = get_rebalances,
 }

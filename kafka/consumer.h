@@ -38,6 +38,8 @@ int lua_consumer_poll_logs(struct lua_State *L);
 
 int lua_consumer_poll_errors(struct lua_State *L);
 
+int lua_consumer_poll_rebalances(struct lua_State *L);
+
 int lua_consumer_store_offset(struct lua_State *L);
 
 int lua_consumer_close(struct lua_State *L);

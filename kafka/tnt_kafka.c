@@ -23,6 +23,7 @@ luaopen_kafka_tntkafka(lua_State *L) {
             {"poll_msg", lua_consumer_poll_msg},
             {"poll_logs", lua_consumer_poll_logs},
             {"poll_errors", lua_consumer_poll_errors},
+            {"poll_rebalances", lua_consumer_poll_rebalances},
             {"store_offset", lua_consumer_store_offset},
             {"close", lua_consumer_close},
             {"__tostring", lua_consumer_tostring},

@@ -63,7 +63,7 @@ def test_consumer_should_consume_msgs():
 
     server.call("consumer.subscribe", [["test_consume"]])
 
-    response = server.call("consumer.consume", [3])
+    response = server.call("consumer.consume", [10])
 
     assert set(*response) == {
         "test1",
@@ -99,7 +99,7 @@ def test_consumer_should_consume_msgs_from_multiple_topics():
 
     server.call("consumer.subscribe", [["test_multi_consume_1", "test_multi_consume_2"]])
 
-    response = server.call("consumer.consume", [3])
+    response = server.call("consumer.consume", [10])
 
     assert set(*response) == {
         "test1",
@@ -134,7 +134,7 @@ def test_consumer_should_completely_unsubscribe_from_topics():
 
     server.call("consumer.subscribe", [["test_unsubscribe"]])
 
-    response = server.call("consumer.consume", [3])
+    response = server.call("consumer.consume", [10])
 
     assert set(*response) == {
         "test1",
@@ -145,7 +145,7 @@ def test_consumer_should_completely_unsubscribe_from_topics():
 
     write_into_kafka("test_unsubscribe", (message3, ))
 
-    response = server.call("consumer.consume", [3])
+    response = server.call("consumer.consume", [10])
 
     assert set(*response) == set()
 
@@ -195,7 +195,7 @@ def test_consumer_should_partially_unsubscribe_from_topics():
     write_into_kafka("test_unsub_partially_1", (message3, ))
     write_into_kafka("test_unsub_partially_2", (message4, ))
 
-    response = server.call("consumer.consume", [3])
+    response = server.call("consumer.consume", [10])
 
     assert set(*response) == {"test4"}
 
@@ -225,6 +225,21 @@ def test_consumer_should_log_debug():
     time.sleep(2)
 
     response = server.call("consumer.get_logs", [])
+
+    assert len(response) > 0
+    assert len(response[0]) > 0
+
+    server.call("consumer.close", [])
+
+
+def test_consumer_should_log_rebalances():
+    server = get_server()
+
+    server.call("consumer.create", ["kafka:9090"])
+
+    time.sleep(2)
+
+    response = server.call("consumer.get_rebalances", [])
 
     assert len(response) > 0
     assert len(response[0]) > 0

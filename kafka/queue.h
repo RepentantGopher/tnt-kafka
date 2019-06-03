@@ -30,6 +30,16 @@ void *queue_lockfree_pop(queue_t *queue);
 
 void *queue_pop(queue_t *queue);
 
+/**
+ * Push without locking mutex.
+ * Caller must lock and unlock queue mutex by itself.
+ * Use with caution!
+ * @param queue
+ * @param value
+ * @return
+ */
+int queue_lockfree_push(queue_t *queue, void *value);
+
 int queue_push(queue_t *queue, void *value);
 
 queue_t *new_queue();

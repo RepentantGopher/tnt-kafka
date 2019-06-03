@@ -97,11 +97,11 @@ tests-dep:
 tests-run:
 	cd ./tests && \
 		. venv/bin/activate && \
-		pytest -vv && \
+		pytest -W ignore -vv && \
 		deactivate
 
 test-run-with-docker: tests-dep docker-run-all
-	sleep 5
+	sleep 10
 
 	docker run \
     		--net=${NETWORK} \
@@ -153,7 +153,7 @@ test-run-with-docker: tests-dep docker-run-all
 
 	cd ./tests && \
 		. venv/bin/activate && \
-		pytest -vv && \
+		pytest -W ignore -vv && \
 		deactivate
 
 #######################################################################

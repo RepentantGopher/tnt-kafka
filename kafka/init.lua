@@ -43,6 +43,12 @@ function Consumer.create(config)
         end)
     end
 
+    if config.rebalance_callback ~= nil then
+        new._poll_rebalances_fiber = fiber.create(function()
+            new:_poll_rebalances()
+        end)
+    end
+
     return new, nil
 end
 
@@ -114,6 +120,25 @@ end
 
 jit.off(Consumer._poll_errors)
 
+function Consumer:_poll_rebalances()
+    local count, err
+    while true do
+        count, err = self._consumer:poll_rebalances(1)
+        if err ~= nil then
+            log.error("Consumer poll rebalances error: %s", err)
+            -- throtling poll
+            fiber.sleep(0.1)
+        elseif count > 0 then
+            fiber.yield()
+        else
+            -- throtling poll
+            fiber.sleep(0.5)
+        end
+    end
+end
+
+jit.off(Consumer._poll_rebalances)
+
 function Consumer:close()
     self._poll_msg_fiber:cancel()
     self._poll_fiber:cancel()
@@ -122,6 +147,9 @@ function Consumer:close()
     end
     if self._poll_errors_fiber ~= nil then
         self._poll_errors_fiber:cancel()
+    end
+    if self._poll_rebalances_fiber ~= nil then
+        self._poll_rebalances_fiber:cancel()
     end
     self._output_ch:close()
 
