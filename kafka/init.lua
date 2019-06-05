@@ -141,6 +141,15 @@ jit.off(Consumer._poll_rebalances)
 
 function Consumer:close()
     self._poll_msg_fiber:cancel()
+    self._output_ch:close()
+
+    fiber.yield()
+
+    local ok, err = self._consumer:close()
+    if err ~= nil then
+        return ok, err
+    end
+
     self._poll_fiber:cancel()
     if self._poll_logs_fiber ~= nil then
         self._poll_logs_fiber:cancel()
@@ -151,12 +160,10 @@ function Consumer:close()
     if self._poll_rebalances_fiber ~= nil then
         self._poll_rebalances_fiber:cancel()
     end
-    self._output_ch:close()
 
-    local ok, err = self._consumer:close()
     self._consumer = nil
 
-    return err
+    return ok, err
 end
 
 function Consumer:subscribe(topics)

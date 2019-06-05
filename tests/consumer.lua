@@ -24,7 +24,7 @@ local function create(brokers, additional_opts)
     end
 
     local rebalance_callback = function(msg)
-        log.info("got rebalance msg: %s", json.decode(msg))
+        log.info("got rebalance msg: %s", json.encode(msg))
         table.insert(rebalances, msg)
     end
 
@@ -93,9 +93,18 @@ local function consume(timeout)
             local msg = out:get()
             if msg ~= nil then
                 log.info(msg)
+                log.info("before print")
+                log.info("got msg with topic='%s'", msg:topic())
+                log.info("got msg with partition='%d'", msg:partition())
+                log.info("got msg with offset='%d'", msg:offset())
+                log.info("got msg with key='%s'", msg:key())
+                log.info("got msg with value='%s'", msg:value())
                 log.info("got msg with topic='%s' partition='%d' offset='%d' key='%s' value='%s'", msg:topic(), msg:partition(), msg:offset(), msg:key(), msg:value())
+                log.info("after print")
                 table.insert(consumed, msg:value())
+                log.info("after add to table")
                 local err = consumer:store_offset(msg)
+                log.info("after store offsets")
                 if err ~= nil then
                     log.error("got error '%s' while commiting msg from topic '%s'", err, msg:topic())
                 end

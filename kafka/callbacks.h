@@ -87,13 +87,13 @@ void destroy_rebalance_msg(rebalance_msg_t *rebalance_msg);
 
 void rebalance_callback(rd_kafka_t *consumer, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *partitions, void *opaque);
 
-
 /**
  * Structure which contains all queues for communication between main TX thread and
  * RDKafka callbacks from background threads
  */
 
 typedef struct {
+    queue_t *consume_queue;
     queue_t *log_queue;
     int      log_cb_ref;
     queue_t *error_queue;

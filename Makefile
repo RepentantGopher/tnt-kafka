@@ -145,6 +145,12 @@ test-run-with-docker: tests-dep docker-run-all
 		kafka-topics --create --topic test_multi_consume_2 --partitions 1 --replication-factor 1 \
 		--if-not-exists --zookeeper zookeeper:2181
 
+	docker run \
+		--net=${NETWORK} \
+		--rm confluentinc/cp-kafka:5.0.0 \
+		kafka-topics --create --topic test_consuming_from_last_committed_offset --partitions 1 --replication-factor 1 \
+		--if-not-exists --zookeeper zookeeper:2181
+
 	cd ./tests && \
 		python3 -m venv venv && \
 		. venv/bin/activate && \

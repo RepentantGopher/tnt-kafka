@@ -20,7 +20,6 @@
 typedef struct {
     rd_kafka_t                      *rd_consumer;
     rd_kafka_topic_partition_list_t *topics;
-    rd_kafka_queue_t                *rd_msg_queue;
     event_queues_t                  *event_queues;
 } consumer_t;
 

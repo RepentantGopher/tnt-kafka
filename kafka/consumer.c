@@ -119,7 +119,17 @@ lua_consumer_tostring(struct lua_State *L) {
 static ssize_t
 consumer_poll(va_list args) {
     rd_kafka_t *rd_consumer = va_arg(args, rd_kafka_t *);
-    rd_kafka_poll(rd_consumer, 1000);
+    event_queues_t *event_queues = rd_kafka_opaque(rd_consumer);
+    rd_kafka_message_t *rd_msg = rd_kafka_consumer_poll(rd_consumer, 1000);
+    if (rd_msg != NULL) {
+        if (rd_msg->err != RD_KAFKA_RESP_ERR_NO_ERROR) {
+            // FIXME: push errors to error queue?
+            rd_kafka_message_destroy(rd_msg);
+        } else {
+            queue_push(event_queues->consume_queue, rd_msg);
+        }
+    }
+
     return 0;
 }
 
@@ -144,32 +154,27 @@ lua_consumer_poll_msg(struct lua_State *L) {
     consumer_t *consumer = lua_check_consumer(L, 1);
     int counter = 0;
     int msgs_limit = lua_tonumber(L, 2);
-    rd_kafka_event_t *event = NULL;
-    lua_createtable(L, msgs_limit, 0);
 
+    lua_createtable(L, msgs_limit, 0);
+    rd_kafka_message_t *rd_msg = NULL;
     while (msgs_limit > counter) {
-        event = rd_kafka_queue_poll(consumer->rd_msg_queue, 0);
-        if (event == NULL) {
+        rd_msg = queue_pop(consumer->event_queues->consume_queue);
+        if (rd_msg == NULL) {
             break;
         }
-        if (rd_kafka_event_type(event) == RD_KAFKA_EVENT_FETCH) {
-            counter += 1;
+        counter += 1;
 
-            msg_t *msg;
-            msg = malloc(sizeof(msg_t));
-            msg->rd_message = rd_kafka_event_message_next(event);
-            msg->rd_event = event;
+        msg_t *msg;
+        msg = malloc(sizeof(msg_t));
+        msg->rd_message = rd_msg;
 
-            msg_t **msg_p = (msg_t **)lua_newuserdata(L, sizeof(msg));
-            *msg_p = msg;
+        msg_t **msg_p = (msg_t **)lua_newuserdata(L, sizeof(msg));
+        *msg_p = msg;
 
-            luaL_getmetatable(L, consumer_msg_label);
-            lua_setmetatable(L, -2);
+        luaL_getmetatable(L, consumer_msg_label);
+        lua_setmetatable(L, -2);
 
-            lua_rawseti(L, -2, counter);
-        } else {
-            rd_kafka_event_destroy(event);
-        }
+        lua_rawseti(L, -2, counter);
     }
     return 1;
 }
@@ -371,9 +376,6 @@ lua_consumer_poll_rebalances(struct lua_State *L) {
         return 2;
     }
 
-    // FIXME:
-    // rd_kafka_consumer_poll(consumer, 0);
-
     int limit = lua_tonumber(L, 2);
     rebalance_msg_t *msg = NULL;
     int count = 0;
@@ -440,20 +442,29 @@ lua_consumer_store_offset(struct lua_State *L) {
     return 0;
 }
 
+static ssize_t
+wait_consumer_close(va_list args) {
+    rd_kafka_t *rd_consumer = va_arg(args, rd_kafka_t *);
+    rd_kafka_commit(rd_consumer, NULL, 0); // sync commit of current offsets
+    if (rd_kafka_consumer_close(rd_consumer) != RD_KAFKA_RESP_ERR_NO_ERROR) {
+        // FIXME: maybe send errors to error queue?
+        return -1;
+    }
+
+    return 0;
+}
+
 static rd_kafka_resp_err_t
-consumer_close(struct lua_State *L, consumer_t *consumer) {
+consumer_destroy(struct lua_State *L, consumer_t *consumer) {
     rd_kafka_resp_err_t err = RD_KAFKA_RESP_ERR_NO_ERROR;
 
     if (consumer->topics != NULL) {
         rd_kafka_topic_partition_list_destroy(consumer->topics);
     }
 
-    if (consumer->rd_msg_queue != NULL) {
-        rd_kafka_queue_destroy(consumer->rd_msg_queue);
-    }
-
-    if (consumer->rd_consumer != NULL) {
-        err = rd_kafka_consumer_close(consumer->rd_consumer);
+    // trying to close in background until success
+    while (coio_call(wait_consumer_close, consumer->rd_consumer) == -1) {
+        // FIXME: maybe send errors to error queue?
     }
 
     if (consumer->event_queues != NULL) {
@@ -479,18 +490,11 @@ lua_consumer_close(struct lua_State *L) {
         return 1;
     }
 
-    rd_kafka_resp_err_t err = consumer_close(L, *consumer_p);
-    if (err) {
-        lua_pushboolean(L, 1);
-
-        const char *const_err_str = rd_kafka_err2str(err);
-        char err_str[512];
-        strcpy(err_str, const_err_str);
-        int fail = safe_pushstring(L, err_str);
-        return fail ? lua_push_error(L): 2;
+    // trying to close in background until success
+    while (coio_call(wait_consumer_close, (*consumer_p)->rd_consumer) == -1) {
+        // FIXME: maybe send errors to error queue?
     }
 
-    *consumer_p = NULL;
     lua_pushboolean(L, 1);
     return 1;
 }
@@ -499,7 +503,7 @@ int
 lua_consumer_gc(struct lua_State *L) {
     consumer_t **consumer_p = (consumer_t **)luaL_checkudata(L, 1, consumer_label);
     if (consumer_p && *consumer_p) {
-        consumer_close(L, *consumer_p);
+        consumer_destroy(L, *consumer_p);
     }
     if (consumer_p)
         *consumer_p = NULL;
@@ -556,6 +560,7 @@ lua_create_consumer(struct lua_State *L) {
     rd_kafka_conf_set_default_topic_conf(rd_config, topic_conf);
 
     event_queues_t *event_queues = new_event_queues();
+    event_queues->consume_queue = new_queue();
 
     lua_pushstring(L, "error_callback");
     lua_gettable(L, -2 );
@@ -631,17 +636,13 @@ lua_create_consumer(struct lua_State *L) {
         return fail ? lua_push_error(L): 2;
     }
 
-    // FIXME:
-    // rd_kafka_poll_set_consumer(rk);
-
-    rd_kafka_queue_t *rd_msg_queue = rd_kafka_queue_get_consumer(rd_consumer);
+    rd_kafka_poll_set_consumer(rd_consumer);
 
     consumer_t *consumer;
     consumer = malloc(sizeof(consumer_t));
     consumer->rd_consumer = rd_consumer;
     consumer->topics = NULL;
     consumer->event_queues = event_queues;
-    consumer->rd_msg_queue = rd_msg_queue;
 
     consumer_t **consumer_p = (consumer_t **)lua_newuserdata(L, sizeof(consumer));
     *consumer_p = consumer;

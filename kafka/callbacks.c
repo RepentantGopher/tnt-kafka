@@ -218,64 +218,65 @@ destroy_rebalance_msg(rebalance_msg_t *rebalance_msg) {
 void
 rebalance_callback(rd_kafka_t *consumer, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *partitions, void *opaque) {
     event_queues_t *event_queues = opaque;
-//    rebalance_msg_t *msg = NULL;
-    if (event_queues != NULL && event_queues->rebalance_queue != NULL) {
-        switch (err)
-        {
-            case RD_KAFKA_RESP_ERR__ASSIGN_PARTITIONS:
-//                msg = new_rebalance_assign_msg(partitions);
-//                if (msg != NULL) {
-//
-//                    pthread_mutex_lock(&msg->lock);
-//
-//                    if (queue_push(event_queues->rebalance_queue, msg) == 0) {
-//                        // waiting while main TX thread invokes rebalance callback
-//                        pthread_cond_wait(&msg->sync, &msg->lock);
-//                    }
-//
-//                    pthread_mutex_unlock(&msg->lock);
-//
-//                    destroy_rebalance_msg(msg);
-//                }
-                rd_kafka_assign(consumer, partitions);
-                break;
+    rebalance_msg_t *msg = NULL;
+    switch (err)
+    {
+        case RD_KAFKA_RESP_ERR__ASSIGN_PARTITIONS:
+            msg = new_rebalance_assign_msg(partitions);
+            if (msg != NULL) {
 
-            case RD_KAFKA_RESP_ERR__REVOKE_PARTITIONS:
-//                msg = new_rebalance_revoke_msg(partitions);
-//                if (msg != NULL) {
-//
-//                    pthread_mutex_lock(&msg->lock);
-//
-//                    if (queue_push(event_queues->rebalance_queue, msg) == 0) {
-//                        // waiting while main TX thread invokes rebalance callback
-//                        pthread_cond_wait(&msg->sync, &msg->lock);
-//                    }
-//
-//                    pthread_mutex_unlock(&msg->lock);
-//
-//                    destroy_rebalance_msg(msg);
-//                }
-                rd_kafka_assign(consumer, NULL);
-                break;
+                pthread_mutex_lock(&msg->lock);
 
-            default:
-//                msg = new_rebalance_error_msg(err);
-//                if (msg != NULL) {
-//
-//                    pthread_mutex_lock(&msg->lock);
-//
-//                    if (queue_push(event_queues->rebalance_queue, msg) == 0) {
-//                        // waiting while main TX thread invokes rebalance callback
-//                        pthread_cond_wait(&msg->sync, &msg->lock);
-//                    }
-//
-//                    pthread_mutex_unlock(&msg->lock);
-//
-//                    destroy_rebalance_msg(msg);
-//                }
-                rd_kafka_assign(consumer, NULL);
-                break;
-        }
+                if (queue_push(event_queues->rebalance_queue, msg) == 0) {
+                    // waiting while main TX thread invokes rebalance callback
+                    pthread_cond_wait(&msg->sync, &msg->lock);
+                }
+
+                pthread_mutex_unlock(&msg->lock);
+
+                destroy_rebalance_msg(msg);
+            }
+            rd_kafka_assign(consumer, partitions);
+            break;
+
+        case RD_KAFKA_RESP_ERR__REVOKE_PARTITIONS:
+            rd_kafka_commit(consumer, partitions, 0); // sync commit
+
+            msg = new_rebalance_revoke_msg(partitions);
+            if (msg != NULL) {
+
+                pthread_mutex_lock(&msg->lock);
+
+                if (queue_push(event_queues->rebalance_queue, msg) == 0) {
+                    // waiting while main TX thread invokes rebalance callback
+                    pthread_cond_wait(&msg->sync, &msg->lock);
+                }
+
+                pthread_mutex_unlock(&msg->lock);
+
+                destroy_rebalance_msg(msg);
+            }
+
+            rd_kafka_assign(consumer, NULL);
+            break;
+
+        default:
+            msg = new_rebalance_error_msg(err);
+            if (msg != NULL) {
+
+                pthread_mutex_lock(&msg->lock);
+
+                if (queue_push(event_queues->rebalance_queue, msg) == 0) {
+                    // waiting while main TX thread invokes rebalance callback
+                    pthread_cond_wait(&msg->sync, &msg->lock);
+                }
+
+                pthread_mutex_unlock(&msg->lock);
+
+                destroy_rebalance_msg(msg);
+            }
+            rd_kafka_assign(consumer, NULL);
+            break;
     }
 }
 
@@ -293,10 +294,22 @@ event_queues_t *new_event_queues() {
     event_queues->delivery_queue = NULL;
     event_queues->rebalance_cb_ref = LUA_REFNIL;
     event_queues->rebalance_queue = NULL;
+    event_queues->consume_queue = NULL;
     return event_queues;
 }
 
 void destroy_event_queues(struct lua_State *L, event_queues_t *event_queues) {
+    if (event_queues->consume_queue != NULL) {
+        rd_kafka_message_t *msg = NULL;
+        while (true) {
+            msg = queue_pop(event_queues->consume_queue);
+            if (msg == NULL) {
+                break;
+            }
+            rd_kafka_message_destroy(msg);
+        }
+        destroy_queue(event_queues->consume_queue);
+    }
     if (event_queues->log_queue != NULL) {
         log_msg_t *msg = NULL;
         while (true) {
