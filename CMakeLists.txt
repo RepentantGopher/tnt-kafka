@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 2.8 FATAL_ERROR)
 project(kafka C)
 
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
+set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY TRUE)
 
 # Set CFLAGS
 set(MY_C_FLAGS "-Wall -Wextra -Werror -std=gnu11 -fno-strict-aliasing -Wno-deprecated-declarations")
@@ -18,8 +19,21 @@ if(${tntver} VERSION_LESS 1.7.4.291)
 endif()
 
 if("${STATIC_BUILD}" STREQUAL "ON" OR "$ENV{STATIC_BUILD}" STREQUAL "ON")
-    include(buildRdKafka)
-    buildrdkafka()
+    add_custom_command(
+        OUTPUT ${CMAKE_BINARY_DIR}/librdkafka/lib/librdkafka.a
+        COMMAND ./configure --prefix=${CMAKE_BINARY_DIR}/librdkafka
+        COMMAND make -j
+        COMMAND make install
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/librdkafka
+        COMMENT "Building librdkafka"
+        VERBATIM
+    )
+    add_custom_target(librdkafka.a ALL
+        DEPENDS ${CMAKE_BINARY_DIR}/librdkafka/lib/librdkafka.a
+    )
+
+    set(RDKAFKA_LIBRARY ${CMAKE_BINARY_DIR}/librdkafka/lib/librdkafka.a)
+    set(RDKAFKA_INCLUDE_DIR ${CMAKE_BINARY_DIR}/librdkafka/include)
 else()
     set(RDKAFKA_FIND_REQUIRED ON)
     find_package(RdKafka)
