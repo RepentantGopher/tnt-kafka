@@ -1,3 +1,4 @@
+#include <unistd.h>
 #include <stdlib.h>
 #include <errno.h>
 
@@ -12,6 +13,104 @@
 #include "consumer.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Consumer poll thread
+ */
+
+void *
+consumer_poll_loop(void *arg) {
+    consumer_poller_t *poller = arg;
+    event_queues_t *event_queues = rd_kafka_opaque(poller->rd_consumer);
+    rd_kafka_message_t *rd_msg = NULL;
+    int count = 0;
+    int should_stop = 0;
+
+    while (true) {
+        {
+            pthread_mutex_lock(&poller->lock);
+
+            should_stop = poller->should_stop;
+
+            pthread_mutex_unlock(&poller->lock);
+
+            if (should_stop) {
+                break;
+            }
+        }
+
+        {
+            rd_msg = rd_kafka_consumer_poll(poller->rd_consumer, 1000);
+            if (rd_msg != NULL) {
+                if (rd_msg->err != RD_KAFKA_RESP_ERR_NO_ERROR) {
+                    // FIXME: push errors to error queue?
+                    rd_kafka_message_destroy(rd_msg);
+                } else {
+                    pthread_mutex_lock(&event_queues->consume_queue->lock);
+
+                    queue_lockfree_push(event_queues->consume_queue, rd_msg);
+                    count = event_queues->consume_queue->count;
+
+                    pthread_mutex_unlock(&event_queues->consume_queue->lock);
+
+                    if (count >= 50000) {
+                        // throttling calls with 100ms sleep when there are too many messages pending in queue
+                        usleep(100000);
+                    }
+                }
+            } else {
+                // throttling calls with 100ms sleep
+                usleep(100000);
+            }
+        }
+    }
+
+    pthread_exit(NULL);
+}
+
+consumer_poller_t *
+new_consumer_poller(rd_kafka_t *rd_consumer) {
+    consumer_poller_t *poller = NULL;
+    poller = malloc(sizeof(consumer_poller_t));
+    if (poller == NULL) {
+        return NULL;
+    }
+    poller->rd_consumer = rd_consumer;
+    poller->should_stop = 0;
+
+    pthread_mutex_init(&poller->lock, NULL);
+    pthread_attr_init(&poller->attr);
+    pthread_attr_setdetachstate(&poller->attr, PTHREAD_CREATE_JOINABLE);
+    pthread_create(&poller->thread, &poller->attr, consumer_poll_loop, (void *)poller);
+
+    return poller;
+}
+
+static ssize_t
+stop_poller(va_list args) {
+    consumer_poller_t *poller = va_arg(args, consumer_poller_t *);
+    pthread_mutex_lock(&poller->lock);
+
+    poller->should_stop = 1;
+
+    pthread_mutex_unlock(&poller->lock);
+
+    pthread_join(poller->thread, NULL);
+
+    return 0;
+}
+
+void
+destroy_consumer_poller(consumer_poller_t *poller) {
+    // stopping polling thread
+    coio_call(stop_poller, poller);
+
+    pthread_attr_destroy(&poller->attr);
+    pthread_mutex_destroy(&poller->lock);
+
+    free(poller);
+}
+
 /**
  * Consumer
  */
@@ -114,36 +213,6 @@ lua_consumer_tostring(struct lua_State *L) {
     consumer_t *consumer = lua_check_consumer(L, 1);
     lua_pushfstring(L, "Kafka Consumer: %p", consumer);
     return 1;
-}
-
-static ssize_t
-consumer_poll(va_list args) {
-    rd_kafka_t *rd_consumer = va_arg(args, rd_kafka_t *);
-    event_queues_t *event_queues = rd_kafka_opaque(rd_consumer);
-    rd_kafka_message_t *rd_msg = rd_kafka_consumer_poll(rd_consumer, 1000);
-    if (rd_msg != NULL) {
-        if (rd_msg->err != RD_KAFKA_RESP_ERR_NO_ERROR) {
-            // FIXME: push errors to error queue?
-            rd_kafka_message_destroy(rd_msg);
-        } else {
-            queue_push(event_queues->consume_queue, rd_msg);
-        }
-    }
-
-    return 0;
-}
-
-int
-lua_consumer_poll(struct lua_State *L) {
-    if (lua_gettop(L) != 1)
-        luaL_error(L, "Usage: err = consumer:poll()");
-
-    consumer_t *consumer = lua_check_consumer(L, 1);
-    if (coio_call(consumer_poll, consumer->rd_consumer) == -1) {
-        lua_pushstring(L, "unexpected error on consumer poll");
-        return 1;
-    }
-    return 0;
 }
 
 int
@@ -467,6 +536,10 @@ consumer_destroy(struct lua_State *L, consumer_t *consumer) {
         // FIXME: maybe send errors to error queue?
     }
 
+    if (consumer->poller != NULL) {
+        destroy_consumer_poller(consumer->poller);
+    }
+
     if (consumer->event_queues != NULL) {
         destroy_event_queues(L, consumer->event_queues);
     }
@@ -638,11 +711,15 @@ lua_create_consumer(struct lua_State *L) {
 
     rd_kafka_poll_set_consumer(rd_consumer);
 
+    // creating background thread for polling consumer
+    consumer_poller_t *poller = new_consumer_poller(rd_consumer);
+
     consumer_t *consumer;
     consumer = malloc(sizeof(consumer_t));
     consumer->rd_consumer = rd_consumer;
     consumer->topics = NULL;
     consumer->event_queues = event_queues;
+    consumer->poller = poller;
 
     consumer_t **consumer_p = (consumer_t **)lua_newuserdata(L, sizeof(consumer));
     *consumer_p = consumer;

@@ -340,7 +340,7 @@ Local run in docker:
 
 ### Auto offset store enabled
 
-Result: over 140000 consumed messages per second on macbook pro 2016
+Result: over 190000 consumed messages per second on macbook pro 2016
 
 Local run in docker:
 ```bash
@@ -351,7 +351,7 @@ Local run in docker:
 
 ### Manual offset store
 
-Result: over 140000 consumed messages per second on macbook pro 2016
+Result: over 190000 consumed messages per second on macbook pro 2016
 
 Local run in docker:
 ```bash

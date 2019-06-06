@@ -23,10 +23,6 @@ function Consumer.create(config)
     }
     setmetatable(new, Consumer)
 
-    new._poll_fiber = fiber.create(function()
-        new:_poll()
-    end)
-
     new._poll_msg_fiber = fiber.create(function()
         new:_poll_msg()
     end)
@@ -150,7 +146,6 @@ function Consumer:close()
         return ok, err
     end
 
-    self._poll_fiber:cancel()
     if self._poll_logs_fiber ~= nil then
         self._poll_logs_fiber:cancel()
     end

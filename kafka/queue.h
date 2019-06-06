@@ -14,9 +14,10 @@ typedef struct queue_node_t {
 } queue_node_t;
 
 typedef struct {
-    pthread_mutex_t lock;
-    queue_node_t *head;
-    queue_node_t *tail;
+    pthread_mutex_t  lock;
+    queue_node_t    *head;
+    queue_node_t    *tail;
+    int              count;
 } queue_t;
 
 /**

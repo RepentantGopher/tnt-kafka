@@ -28,6 +28,8 @@ queue_lockfree_pop(queue_t *queue) {
         if (queue->head == NULL) {
             queue->tail = NULL;
         }
+
+        queue->count -= 1;
     }
 
     return output;
@@ -76,6 +78,8 @@ queue_lockfree_push(queue_t *queue, void *value) {
         queue->head = new_node;
     }
 
+    queue->count += 1;
+
     return 0;
 }
 
@@ -109,6 +113,7 @@ new_queue() {
     queue->lock = lock;
     queue->head = NULL;
     queue->tail = NULL;
+    queue->count = 0;
 
     return queue;
 }
