@@ -199,10 +199,6 @@ function Producer.create(config)
     }
     setmetatable(new, Producer)
 
-    new._poll_fiber = fiber.create(function()
-        new:_poll()
-    end)
-
     new._msg_delivery_poll_fiber = fiber.create(function()
         new:_msg_delivery_poll()
     end)
@@ -221,18 +217,6 @@ function Producer.create(config)
 
     return new, nil
 end
-
-function Producer:_poll()
-    local err
-    while true do
-        err = self._producer:poll()
-        if err ~= nil then
-            log.error(err)
-        end
-    end
-end
-
-jit.off(Producer._poll)
 
 function Producer:_msg_delivery_poll()
     local count, err
@@ -319,7 +303,8 @@ function Producer:produce(msg)
 end
 
 function Producer:close()
-    self._poll_fiber:cancel()
+    local ok, err = self._producer:close()
+
     self._msg_delivery_poll_fiber:cancel()
     if self._poll_logs_fiber ~= nil then
         self._poll_logs_fiber:cancel()
@@ -328,10 +313,9 @@ function Producer:close()
         self._poll_errors_fiber:cancel()
     end
 
-    local ok, err = self._producer:close()
     self._producer = nil
 
-    return err
+    return ok, err
 end
 
 return {

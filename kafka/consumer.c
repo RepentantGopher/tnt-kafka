@@ -568,6 +568,11 @@ lua_consumer_close(struct lua_State *L) {
         // FIXME: maybe send errors to error queue?
     }
 
+    if ((*consumer_p)->poller != NULL) {
+        destroy_consumer_poller((*consumer_p)->poller);
+        (*consumer_p)->poller = NULL;
+    }
+
     lua_pushboolean(L, 1);
     return 1;
 }

@@ -66,7 +66,7 @@ local function get_logs()
 end
 
 local function close()
-    local err = producer:close()
+    local ok, err = producer:close()
     if err ~= nil then
         log.error("got err %s", err)
         box.error{code = 500, reason = err}

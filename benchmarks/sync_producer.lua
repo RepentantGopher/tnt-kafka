@@ -17,7 +17,7 @@ local function produce()
     local producer, err = tnt_kafka.Producer.create({
         brokers = "kafka:9092",
         options = {
-            ["queue.buffering.max.ms"] = "100",
+            ["queue.buffering.max.ms"] = "50",
         }
     })
     if err ~= nil then
@@ -27,7 +27,7 @@ local function produce()
 
     local before = clock.monotonic64()
     local input_ch = fiber.channel();
-    for i = 1, 12000 do
+    for i = 1, 10000 do
         fiber.create(function()
             while true do
                 if input_ch:is_closed() then
@@ -57,6 +57,9 @@ local function produce()
 
     for i = 1, 10000000 do
         input_ch:put(i)
+        if i % 10000 == 0 then
+            fiber.yield()
+        end
     end
 
     input_ch:close()

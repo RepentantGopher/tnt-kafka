@@ -316,7 +316,7 @@ because `rd_kafka_destroy` sometimes hangs forever.
 
 ### Async
 
-Result: over 150000 produced messages per second on macbook pro 2016
+Result: over 160000 produced messages per second on macbook pro 2016
 
 Local run in docker:
 ```bash

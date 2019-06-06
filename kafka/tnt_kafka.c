@@ -58,7 +58,6 @@ luaopen_kafka_tntkafka(lua_State *L) {
     lua_pop(L, 1);
 
     static const struct luaL_Reg producer_methods [] = {
-            {"poll", lua_producer_poll},
             {"produce", lua_producer_produce},
             {"msg_delivery_poll", lua_producer_msg_delivery_poll},
             {"poll_logs", lua_producer_poll_logs},

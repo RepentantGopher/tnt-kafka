@@ -177,7 +177,7 @@ def test_consumer_should_partially_unsubscribe_from_topics():
 
     server = get_server()
 
-    with create_consumer(server, "kafka:9092", {"group.id": "should_partially_unsubscribe_from_topics", "debug": "consumer,cgrp,topic"}):
+    with create_consumer(server, "kafka:9092", {"group.id": "should_partially_unsubscribe_from_topics"}):
         server.call("consumer.subscribe", [["test_unsub_partially_1", "test_unsub_partially_2"]])
 
         write_into_kafka("test_unsub_partially_1", (message1, ))
@@ -209,8 +209,7 @@ def test_consumer_should_log_errors():
 
         response = server.call("consumer.get_errors", [])
 
-        assert len(response) > 0
-        assert len(response[0]) > 0
+        assert len(response.data[0]) > 0
 
 
 def test_consumer_should_log_debug():
@@ -221,8 +220,7 @@ def test_consumer_should_log_debug():
 
         response = server.call("consumer.get_logs", [])
 
-        assert len(response) > 0
-        assert len(response[0]) > 0
+        assert len(response.data[0]) > 0
 
 
 def test_consumer_should_log_rebalances():
@@ -231,10 +229,13 @@ def test_consumer_should_log_rebalances():
     with create_consumer(server, "kafka:9092"):
         time.sleep(2)
 
+        server.call("consumer.subscribe", [["test_unsub_partially_1"]])
+
+        time.sleep(10)
+
         response = server.call("consumer.get_rebalances", [])
 
-        assert len(response) > 0
-        assert len(response[0]) > 0
+        assert len(response.data[0]) > 0
 
 
 def test_consumer_should_continue_consuming_from_last_committed_offset():
@@ -260,7 +261,7 @@ def test_consumer_should_continue_consuming_from_last_committed_offset():
 
     server = get_server()
 
-    with create_consumer(server, "kafka:9092", {"group.id": "should_continue_consuming_from_last_committed_offset", "debug": "consumer,cgrp,topic"}):
+    with create_consumer(server, "kafka:9092", {"group.id": "should_continue_consuming_from_last_committed_offset"}):
         server.call("consumer.subscribe", [["test_consuming_from_last_committed_offset"]])
 
         write_into_kafka("test_consuming_from_last_committed_offset", (message1, ))
@@ -276,7 +277,7 @@ def test_consumer_should_continue_consuming_from_last_committed_offset():
 
     time.sleep(2)
 
-    with create_consumer(server, "kafka:9092", {"group.id": "should_continue_consuming_from_last_committed_offset", "debug": "consumer,cgrp,topic"}):
+    with create_consumer(server, "kafka:9092", {"group.id": "should_continue_consuming_from_last_committed_offset"}):
         server.call("consumer.subscribe", [["test_consuming_from_last_committed_offset"]])
 
         write_into_kafka("test_consuming_from_last_committed_offset", (message3, ))
