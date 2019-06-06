@@ -9,7 +9,7 @@ endif(APPLE)
 
 target_link_libraries(tntkafka pthread)
 
-if ("${STATIC_BUILD}" OR $ENV{STATIC_BUILD})
+if("${STATIC_BUILD}" STREQUAL "ON" OR "$ENV{STATIC_BUILD}" STREQUAL "ON")
 	add_dependencies(tntkafka rdkafka)
 	target_link_libraries(tntkafka ${CMAKE_SOURCE_DIR}/librdkafka/src/librdkafka.a)
 else()

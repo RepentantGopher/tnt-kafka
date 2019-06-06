@@ -17,7 +17,7 @@ if(${tntver} VERSION_LESS 1.7.4.291)
     message(FATAL_ERROR "Tarantool >= 1.7.4-291 is required")
 endif()
 
-if("${STATIC_BUILD}" OR $ENV{STATIC_BUILD})
+if("${STATIC_BUILD}" STREQUAL "ON" OR "$ENV{STATIC_BUILD}" STREQUAL "ON")
     include(buildRdKafka)
     buildrdkafka()
 else()
