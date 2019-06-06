@@ -1,5 +1,7 @@
 .idea
+.rocks
 tests/venv
 tests/.pytest_cache
 tests/__*
 cmake-build-debug
+build.luarocks/
