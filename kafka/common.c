@@ -31,16 +31,3 @@ lua_push_error(struct lua_State *L) {
     lua_insert(L, -2);
     return 2;
 }
-
-// FIXME: suppress warning
-//static ssize_t
-//kafka_destroy(va_list args) {
-//    rd_kafka_t *kafka = va_arg(args, rd_kafka_t *);
-//
-//    // waiting in background while garbage collector collects all refs
-//    sleep(5);
-//
-//    rd_kafka_destroy(kafka);
-//    while (rd_kafka_wait_destroyed(1000) == -1) {}
-//    return 0;
-//}

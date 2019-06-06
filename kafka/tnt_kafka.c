@@ -19,10 +19,10 @@ luaopen_kafka_tntkafka(lua_State *L) {
     static const struct luaL_Reg consumer_methods [] = {
             {"subscribe", lua_consumer_subscribe},
             {"unsubscribe", lua_consumer_unsubscribe},
-            {"poll", lua_consumer_poll},
             {"poll_msg", lua_consumer_poll_msg},
             {"poll_logs", lua_consumer_poll_logs},
             {"poll_errors", lua_consumer_poll_errors},
+            {"poll_rebalances", lua_consumer_poll_rebalances},
             {"store_offset", lua_consumer_store_offset},
             {"close", lua_consumer_close},
             {"__tostring", lua_consumer_tostring},
@@ -58,7 +58,6 @@ luaopen_kafka_tntkafka(lua_State *L) {
     lua_pop(L, 1);
 
     static const struct luaL_Reg producer_methods [] = {
-            {"poll", lua_producer_poll},
             {"produce", lua_producer_produce},
             {"msg_delivery_poll", lua_producer_msg_delivery_poll},
             {"poll_logs", lua_producer_poll_logs},

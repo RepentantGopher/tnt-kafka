@@ -12,8 +12,7 @@
  * Consumer Message
  */
 typedef struct {
-    const rd_kafka_message_t *rd_message;
-    rd_kafka_event_t *rd_event;
+    rd_kafka_message_t *rd_message;
 } msg_t;
 
 msg_t *lua_check_consumer_msg(struct lua_State *L, int index);

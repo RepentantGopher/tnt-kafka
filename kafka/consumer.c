@@ -1,3 +1,4 @@
+#include <unistd.h>
 #include <stdlib.h>
 #include <errno.h>
 
@@ -12,6 +13,104 @@
 #include "consumer.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Consumer poll thread
+ */
+
+void *
+consumer_poll_loop(void *arg) {
+    consumer_poller_t *poller = arg;
+    event_queues_t *event_queues = rd_kafka_opaque(poller->rd_consumer);
+    rd_kafka_message_t *rd_msg = NULL;
+    int count = 0;
+    int should_stop = 0;
+
+    while (true) {
+        {
+            pthread_mutex_lock(&poller->lock);
+
+            should_stop = poller->should_stop;
+
+            pthread_mutex_unlock(&poller->lock);
+
+            if (should_stop) {
+                break;
+            }
+        }
+
+        {
+            rd_msg = rd_kafka_consumer_poll(poller->rd_consumer, 1000);
+            if (rd_msg != NULL) {
+                if (rd_msg->err != RD_KAFKA_RESP_ERR_NO_ERROR) {
+                    // FIXME: push errors to error queue?
+                    rd_kafka_message_destroy(rd_msg);
+                } else {
+                    pthread_mutex_lock(&event_queues->consume_queue->lock);
+
+                    queue_lockfree_push(event_queues->consume_queue, rd_msg);
+                    count = event_queues->consume_queue->count;
+
+                    pthread_mutex_unlock(&event_queues->consume_queue->lock);
+
+                    if (count >= 50000) {
+                        // throttling calls with 100ms sleep when there are too many messages pending in queue
+                        usleep(100000);
+                    }
+                }
+            } else {
+                // throttling calls with 100ms sleep
+                usleep(100000);
+            }
+        }
+    }
+
+    pthread_exit(NULL);
+}
+
+consumer_poller_t *
+new_consumer_poller(rd_kafka_t *rd_consumer) {
+    consumer_poller_t *poller = NULL;
+    poller = malloc(sizeof(consumer_poller_t));
+    if (poller == NULL) {
+        return NULL;
+    }
+    poller->rd_consumer = rd_consumer;
+    poller->should_stop = 0;
+
+    pthread_mutex_init(&poller->lock, NULL);
+    pthread_attr_init(&poller->attr);
+    pthread_attr_setdetachstate(&poller->attr, PTHREAD_CREATE_JOINABLE);
+    pthread_create(&poller->thread, &poller->attr, consumer_poll_loop, (void *)poller);
+
+    return poller;
+}
+
+static ssize_t
+stop_poller(va_list args) {
+    consumer_poller_t *poller = va_arg(args, consumer_poller_t *);
+    pthread_mutex_lock(&poller->lock);
+
+    poller->should_stop = 1;
+
+    pthread_mutex_unlock(&poller->lock);
+
+    pthread_join(poller->thread, NULL);
+
+    return 0;
+}
+
+void
+destroy_consumer_poller(consumer_poller_t *poller) {
+    // stopping polling thread
+    coio_call(stop_poller, poller);
+
+    pthread_attr_destroy(&poller->attr);
+    pthread_mutex_destroy(&poller->lock);
+
+    free(poller);
+}
+
 /**
  * Consumer
  */
@@ -116,26 +215,6 @@ lua_consumer_tostring(struct lua_State *L) {
     return 1;
 }
 
-static ssize_t
-consumer_poll(va_list args) {
-    rd_kafka_t *rd_consumer = va_arg(args, rd_kafka_t *);
-    rd_kafka_poll(rd_consumer, 1000);
-    return 0;
-}
-
-int
-lua_consumer_poll(struct lua_State *L) {
-    if (lua_gettop(L) != 1)
-        luaL_error(L, "Usage: err = consumer:poll()");
-
-    consumer_t *consumer = lua_check_consumer(L, 1);
-    if (coio_call(consumer_poll, consumer->rd_consumer) == -1) {
-        lua_pushstring(L, "unexpected error on consumer poll");
-        return 1;
-    }
-    return 0;
-}
-
 int
 lua_consumer_poll_msg(struct lua_State *L) {
     if (lua_gettop(L) != 2)
@@ -144,32 +223,27 @@ lua_consumer_poll_msg(struct lua_State *L) {
     consumer_t *consumer = lua_check_consumer(L, 1);
     int counter = 0;
     int msgs_limit = lua_tonumber(L, 2);
-    rd_kafka_event_t *event = NULL;
-    lua_createtable(L, msgs_limit, 0);
 
+    lua_createtable(L, msgs_limit, 0);
+    rd_kafka_message_t *rd_msg = NULL;
     while (msgs_limit > counter) {
-        event = rd_kafka_queue_poll(consumer->rd_msg_queue, 0);
-        if (event == NULL) {
+        rd_msg = queue_pop(consumer->event_queues->consume_queue);
+        if (rd_msg == NULL) {
             break;
         }
-        if (rd_kafka_event_type(event) == RD_KAFKA_EVENT_FETCH) {
-            counter += 1;
+        counter += 1;
 
-            msg_t *msg;
-            msg = malloc(sizeof(msg_t));
-            msg->rd_message = rd_kafka_event_message_next(event);
-            msg->rd_event = event;
+        msg_t *msg;
+        msg = malloc(sizeof(msg_t));
+        msg->rd_message = rd_msg;
 
-            msg_t **msg_p = (msg_t **)lua_newuserdata(L, sizeof(msg));
-            *msg_p = msg;
+        msg_t **msg_p = (msg_t **)lua_newuserdata(L, sizeof(msg));
+        *msg_p = msg;
 
-            luaL_getmetatable(L, consumer_msg_label);
-            lua_setmetatable(L, -2);
+        luaL_getmetatable(L, consumer_msg_label);
+        lua_setmetatable(L, -2);
 
-            lua_rawseti(L, -2, counter);
-        } else {
-            rd_kafka_event_destroy(event);
-        }
+        lua_rawseti(L, -2, counter);
     }
     return 1;
 }
@@ -277,6 +351,150 @@ lua_consumer_poll_errors(struct lua_State *L) {
 }
 
 int
+lua_prepare_rebalance_callback_args_on_stack(struct lua_State *L, rebalance_msg_t *msg) {
+    rd_kafka_topic_partition_t *tp = NULL;
+    // creating main table
+    lua_createtable(L, 0, 3); // main table
+    if (msg->assigned != NULL) {
+        lua_pushstring(L, "assigned"); //  "assigned" > main table
+        // creating table for assigned topics
+        lua_createtable(L, 0, 10);  //  table with topics > "assigned" > main table
+
+        for (int i = 0; i < msg->assigned->cnt; i++) {
+            tp = &msg->assigned->elems[i];
+
+            lua_pushstring(L, tp->topic); //  topic name > table with topics > "assigned" > main table
+
+            // get value from table
+            lua_pushstring(L, tp->topic); //  topic name > topic name > table with topics > "assigned" > main table
+            lua_gettable(L, -3); // table with partitions or nil > topic name > table with topics > "assigned" > main table
+
+            if (lua_isnil(L, -1) == 1) {
+                // removing nil from top of stack
+                lua_pop(L, 1); // topic name > table with topics > "assigned" > main table
+                // creating table for assigned partitions on topic
+                lua_createtable(L, 0, 10); // table with partitions > topic name > table with topics > "assigned" > main table
+            }
+
+            // add partition to table
+            lua_pushinteger(L, tp->partition);  // key > table with partitions > topic name > table with topics > "assigned" > main table
+            luaL_pushint64(L, tp->offset);  // value > key > table with partitions > topic name > table with topics > "assigned" > main table
+            lua_settable(L, -3);  // table with partitions > topic name > table with topics > "assigned" > main table
+
+            // add table with partitions to table with topics
+            lua_settable(L, -3);  // table with topics > "assigned" > main table
+        }
+
+        lua_settable(L, -3);  // main table
+    }
+    else if (msg->revoked != NULL) {
+        lua_pushstring(L, "revoked"); //  "revoked" > main table
+        // creating table for revoked topics
+        lua_createtable(L, 0, 10);  //  table with topics > "revoked" > main table
+
+        for (int i = 0; i < msg->revoked->cnt; i++) {
+            tp = &msg->revoked->elems[i];
+
+            lua_pushstring(L, tp->topic); //  topic name > table with topics > "revoked" > main table
+
+            // get value from table
+            lua_pushstring(L, tp->topic); //  topic name > topic name > table with topics > "revoked" > main table
+            lua_gettable(L, -3); // table with partitions or nil > topic name > table with topics > "revoked" > main table
+
+            if (lua_isnil(L, -1) == 1) {
+                // removing nil from top of stack
+                lua_pop(L, 1); // topic name > table with topics > "revoked" > main table
+                // creating table for revoked partitions on topic
+                lua_createtable(L, 0, 10); // table with partitions > topic name > table with topics > "revoked" > main table
+            }
+
+            // add partition to table
+            lua_pushinteger(L, tp->partition);  // key > table with partitions > topic name > table with topics > "revoked" > main table
+            luaL_pushint64(L, tp->offset);  // value > key > table with partitions > topic name > table with topics > "revoked" > main table
+            lua_settable(L, -3);  // table with partitions > topic name > table with topics > "revoked" > main table
+
+            // add table with partitions to table with topics
+            lua_settable(L, -3);  // table with topics > "revoked" > main table
+        }
+
+        lua_settable(L, -3);  // main table
+    }
+    else if (msg->err != RD_KAFKA_RESP_ERR_NO_ERROR) {
+        lua_pushstring(L, "error");  //  "error" > main table
+        lua_pushstring(L, rd_kafka_err2str(msg->err));  // msg > "error" > main table
+        lua_settable(L, -3);  // main table
+    }
+    else {
+        return -1;
+    }
+    return 0;
+}
+
+int
+lua_consumer_poll_rebalances(struct lua_State *L) {
+    if (lua_gettop(L) != 2)
+        luaL_error(L, "Usage: count, err = consumer:poll_rebalances(limit)");
+
+    consumer_t *consumer = lua_check_consumer(L, 1);
+    if (consumer->event_queues == NULL || consumer->event_queues->rebalance_queue == NULL || consumer->event_queues->rebalance_cb_ref == LUA_REFNIL) {
+        lua_pushnumber(L, 0);
+        int fail = safe_pushstring(L, "Consumer poll rebalances error: callback for rebalance is not set");
+        if (fail) {
+            return lua_push_error(L);
+        }
+        return 2;
+    }
+
+    int limit = lua_tonumber(L, 2);
+    rebalance_msg_t *msg = NULL;
+    int count = 0;
+    char *err_str = NULL;
+
+    while (count < limit) {
+        msg = queue_pop(consumer->event_queues->rebalance_queue);
+        if (msg == NULL) {
+            break;
+        }
+        count++;
+
+        pthread_mutex_lock(&msg->lock);
+
+        // push callback on stack
+        lua_rawgeti(L, LUA_REGISTRYINDEX, consumer->event_queues->rebalance_cb_ref);
+
+        // push rebalance args on stack
+        if (lua_prepare_rebalance_callback_args_on_stack(L, msg) == 0) {
+            /* do the call (1 arguments, 0 result) */
+            if (lua_pcall(L, 1, 0, 0) != 0) {
+                err_str = (char *)lua_tostring(L, -1);
+            }
+        } else {
+            err_str = "unknown error on rebalance callback args processing";
+        }
+
+        // allowing background thread proceed rebalancing
+        pthread_cond_signal(&msg->sync);
+
+        pthread_mutex_unlock(&msg->lock);
+
+        if (err_str != NULL) {
+            break;
+        }
+    }
+
+    lua_pushnumber(L, (double)count);
+    if (err_str != NULL) {
+        int fail = safe_pushstring(L, err_str);
+        if (fail) {
+            return lua_push_error(L);
+        }
+    } else {
+        lua_pushnil(L);
+    }
+    return 2;
+}
+
+int
 lua_consumer_store_offset(struct lua_State *L) {
     if (lua_gettop(L) != 2)
         luaL_error(L, "Usage: err = consumer:store_offset(msg)");
@@ -293,20 +511,33 @@ lua_consumer_store_offset(struct lua_State *L) {
     return 0;
 }
 
+static ssize_t
+wait_consumer_close(va_list args) {
+    rd_kafka_t *rd_consumer = va_arg(args, rd_kafka_t *);
+    rd_kafka_commit(rd_consumer, NULL, 0); // sync commit of current offsets
+    if (rd_kafka_consumer_close(rd_consumer) != RD_KAFKA_RESP_ERR_NO_ERROR) {
+        // FIXME: maybe send errors to error queue?
+        return -1;
+    }
+
+    return 0;
+}
+
 static rd_kafka_resp_err_t
-consumer_close(struct lua_State *L, consumer_t *consumer) {
+consumer_destroy(struct lua_State *L, consumer_t *consumer) {
     rd_kafka_resp_err_t err = RD_KAFKA_RESP_ERR_NO_ERROR;
 
     if (consumer->topics != NULL) {
         rd_kafka_topic_partition_list_destroy(consumer->topics);
     }
 
-    if (consumer->rd_msg_queue != NULL) {
-        rd_kafka_queue_destroy(consumer->rd_msg_queue);
+    // trying to close in background until success
+    while (coio_call(wait_consumer_close, consumer->rd_consumer) == -1) {
+        // FIXME: maybe send errors to error queue?
     }
 
-    if (consumer->rd_consumer != NULL) {
-        err = rd_kafka_consumer_close(consumer->rd_consumer);
+    if (consumer->poller != NULL) {
+        destroy_consumer_poller(consumer->poller);
     }
 
     if (consumer->event_queues != NULL) {
@@ -332,18 +563,16 @@ lua_consumer_close(struct lua_State *L) {
         return 1;
     }
 
-    rd_kafka_resp_err_t err = consumer_close(L, *consumer_p);
-    if (err) {
-        lua_pushboolean(L, 1);
-
-        const char *const_err_str = rd_kafka_err2str(err);
-        char err_str[512];
-        strcpy(err_str, const_err_str);
-        int fail = safe_pushstring(L, err_str);
-        return fail ? lua_push_error(L): 2;
+    // trying to close in background until success
+    while (coio_call(wait_consumer_close, (*consumer_p)->rd_consumer) == -1) {
+        // FIXME: maybe send errors to error queue?
     }
 
-    *consumer_p = NULL;
+    if ((*consumer_p)->poller != NULL) {
+        destroy_consumer_poller((*consumer_p)->poller);
+        (*consumer_p)->poller = NULL;
+    }
+
     lua_pushboolean(L, 1);
     return 1;
 }
@@ -352,7 +581,7 @@ int
 lua_consumer_gc(struct lua_State *L) {
     consumer_t **consumer_p = (consumer_t **)luaL_checkudata(L, 1, consumer_label);
     if (consumer_p && *consumer_p) {
-        consumer_close(L, *consumer_p);
+        consumer_destroy(L, *consumer_p);
     }
     if (consumer_p)
         *consumer_p = NULL;
@@ -409,6 +638,7 @@ lua_create_consumer(struct lua_State *L) {
     rd_kafka_conf_set_default_topic_conf(rd_config, topic_conf);
 
     event_queues_t *event_queues = new_event_queues();
+    event_queues->consume_queue = new_queue();
 
     lua_pushstring(L, "error_callback");
     lua_gettable(L, -2 );
@@ -426,6 +656,16 @@ lua_create_consumer(struct lua_State *L) {
         event_queues->log_cb_ref = luaL_ref(L, LUA_REGISTRYINDEX);
         event_queues->log_queue = new_queue();
         rd_kafka_conf_set_log_cb(rd_config, log_callback);
+    } else {
+        lua_pop(L, 1);
+    }
+
+    lua_pushstring(L, "rebalance_callback");
+    lua_gettable(L, -2 );
+    if (lua_isfunction(L, -1)) {
+        event_queues->rebalance_cb_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+        event_queues->rebalance_queue = new_queue();
+        rd_kafka_conf_set_rebalance_cb(rd_config, rebalance_callback);
     } else {
         lua_pop(L, 1);
     }
@@ -474,14 +714,17 @@ lua_create_consumer(struct lua_State *L) {
         return fail ? lua_push_error(L): 2;
     }
 
-    rd_kafka_queue_t *rd_msg_queue = rd_kafka_queue_get_consumer(rd_consumer);
+    rd_kafka_poll_set_consumer(rd_consumer);
+
+    // creating background thread for polling consumer
+    consumer_poller_t *poller = new_consumer_poller(rd_consumer);
 
     consumer_t *consumer;
     consumer = malloc(sizeof(consumer_t));
     consumer->rd_consumer = rd_consumer;
     consumer->topics = NULL;
     consumer->event_queues = event_queues;
-    consumer->rd_msg_queue = rd_msg_queue;
+    consumer->poller = poller;
 
     consumer_t **consumer_p = (consumer_t **)lua_newuserdata(L, sizeof(consumer));
     *consumer_p = consumer;

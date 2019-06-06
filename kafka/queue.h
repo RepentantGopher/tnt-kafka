@@ -14,9 +14,10 @@ typedef struct queue_node_t {
 } queue_node_t;
 
 typedef struct {
-    pthread_mutex_t lock;
-    queue_node_t *head;
-    queue_node_t *tail;
+    pthread_mutex_t  lock;
+    queue_node_t    *head;
+    queue_node_t    *tail;
+    int              count;
 } queue_t;
 
 /**
@@ -29,6 +30,16 @@ typedef struct {
 void *queue_lockfree_pop(queue_t *queue);
 
 void *queue_pop(queue_t *queue);
+
+/**
+ * Push without locking mutex.
+ * Caller must lock and unlock queue mutex by itself.
+ * Use with caution!
+ * @param queue
+ * @param value
+ * @return
+ */
+int queue_lockfree_push(queue_t *queue, void *value);
 
 int queue_push(queue_t *queue, void *value);
 

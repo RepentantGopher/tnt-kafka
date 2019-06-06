@@ -15,6 +15,14 @@
  */
 
 typedef struct {
+    rd_kafka_t      *rd_producer;
+    pthread_t       thread;
+    pthread_attr_t  attr;
+    int             should_stop;
+    pthread_mutex_t lock;
+} producer_poller_t;
+
+typedef struct {
     rd_kafka_topic_t **elements;
     int32_t count;
     int32_t capacity;
@@ -32,11 +40,10 @@ typedef struct {
     rd_kafka_t        *rd_producer;
     producer_topics_t *topics;
     event_queues_t    *event_queues;
+    producer_poller_t *poller;
 } producer_t;
 
 int lua_producer_tostring(struct lua_State *L);
-
-int lua_producer_poll(struct lua_State *L);
 
 int lua_producer_msg_delivery_poll(struct lua_State *L);
 

@@ -28,6 +28,8 @@ queue_lockfree_pop(queue_t *queue) {
         if (queue->head == NULL) {
             queue->tail = NULL;
         }
+
+        queue->count -= 1;
     }
 
     return output;
@@ -44,13 +46,19 @@ queue_pop(queue_t *queue) {
     return output;
 }
 
+/**
+ * Push without locking mutex.
+ * Caller must lock and unlock queue mutex by itself.
+ * Use with caution!
+ * @param queue
+ * @param value
+ * @return
+ */
 int
-queue_push(queue_t *queue, void *value) {
+queue_lockfree_push(queue_t *queue, void *value) {
     if (value == NULL || queue == NULL) {
         return -1;
     }
-
-    pthread_mutex_lock(&queue->lock);
 
     queue_node_t *new_node;
     new_node = malloc(sizeof(queue_node_t));
@@ -70,9 +78,24 @@ queue_push(queue_t *queue, void *value) {
         queue->head = new_node;
     }
 
-    pthread_mutex_unlock(&queue->lock);
+    queue->count += 1;
 
     return 0;
+}
+
+int
+queue_push(queue_t *queue, void *value) {
+    if (value == NULL || queue == NULL) {
+        return -1;
+    }
+
+    pthread_mutex_lock(&queue->lock);
+
+    int output = queue_lockfree_push(queue, value);
+
+    pthread_mutex_unlock(&queue->lock);
+
+    return output;
 }
 
 queue_t *
@@ -90,6 +113,7 @@ new_queue() {
     queue->lock = lock;
     queue->head = NULL;
     queue->tail = NULL;
+    queue->count = 0;
 
     return queue;
 }

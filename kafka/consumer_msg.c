@@ -22,12 +22,8 @@ lua_check_consumer_msg(struct lua_State *L, int index) {
 int
 lua_consumer_msg_topic(struct lua_State *L) {
     msg_t *msg = lua_check_consumer_msg(L, 1);
-
-    const char *const_topic = rd_kafka_topic_name(msg->rd_message->rkt);
-    char topic[sizeof(const_topic)];
-    strcpy(topic, const_topic);
-    int fail = safe_pushstring(L, topic);
-    return fail ? lua_push_error(L): 1;
+    lua_pushstring(L, rd_kafka_topic_name(msg->rd_message->rkt));
+    return 1;
 }
 
 int
@@ -112,7 +108,9 @@ int
 lua_consumer_msg_gc(struct lua_State *L) {
     msg_t **msg_p = (msg_t **)luaL_checkudata(L, 1, consumer_msg_label);
     if (msg_p && *msg_p) {
-        rd_kafka_event_destroy((*msg_p)->rd_event);
+        if ((*msg_p)->rd_message != NULL) {
+            rd_kafka_message_destroy((*msg_p)->rd_message);
+        }
         free(*msg_p);
     }
     if (msg_p)

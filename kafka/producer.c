@@ -1,3 +1,4 @@
+#include <unistd.h>
 #include <stdlib.h>
 #include <errno.h>
 
@@ -11,6 +12,85 @@
 #include "producer.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Producer poll thread
+ */
+
+void *
+producer_poll_loop(void *arg) {
+    producer_poller_t *poller = arg;
+    int count = 0;
+    int should_stop = 0;
+
+    while (true) {
+        {
+            pthread_mutex_lock(&poller->lock);
+
+            should_stop = poller->should_stop;
+
+            pthread_mutex_unlock(&poller->lock);
+
+            if (should_stop) {
+                break;
+            }
+        }
+
+        {
+            count = rd_kafka_poll(poller->rd_producer, 1000);
+            if (count == 0) {
+                // throttling calls with 100ms sleep
+                usleep(100000);
+            }
+        }
+    }
+
+    pthread_exit(NULL);
+}
+
+producer_poller_t *
+new_producer_poller(rd_kafka_t *rd_producer) {
+    producer_poller_t *poller = NULL;
+    poller = malloc(sizeof(producer_poller_t));
+    if (poller == NULL) {
+        return NULL;
+    }
+    poller->rd_producer = rd_producer;
+    poller->should_stop = 0;
+
+    pthread_mutex_init(&poller->lock, NULL);
+    pthread_attr_init(&poller->attr);
+    pthread_attr_setdetachstate(&poller->attr, PTHREAD_CREATE_JOINABLE);
+    pthread_create(&poller->thread, &poller->attr, producer_poll_loop, (void *)poller);
+
+    return poller;
+}
+
+static ssize_t
+stop_poller(va_list args) {
+    producer_poller_t *poller = va_arg(args, producer_poller_t *);
+    pthread_mutex_lock(&poller->lock);
+
+    poller->should_stop = 1;
+
+    pthread_mutex_unlock(&poller->lock);
+
+    pthread_join(poller->thread, NULL);
+
+    return 0;
+}
+
+void
+destroy_producer_poller(producer_poller_t *poller) {
+    // stopping polling thread
+    coio_call(stop_poller, poller);
+
+    pthread_attr_destroy(&poller->attr);
+    pthread_mutex_destroy(&poller->lock);
+
+    free(poller);
+}
+
 /**
  * Producer
  */
@@ -72,7 +152,7 @@ static inline producer_t *
 lua_check_producer(struct lua_State *L, int index) {
     producer_t **producer_p = (producer_t **)luaL_checkudata(L, index, producer_label);
     if (producer_p == NULL || *producer_p == NULL)
-        luaL_error(L, "Kafka consumer fatal error: failed to retrieve producer from lua stack!");
+        luaL_error(L, "Kafka producer fatal error: failed to retrieve producer from lua stack!");
     return *producer_p;
 }
 
@@ -81,26 +161,6 @@ lua_producer_tostring(struct lua_State *L) {
     producer_t *producer = lua_check_producer(L, 1);
     lua_pushfstring(L, "Kafka Producer: %p", producer);
     return 1;
-}
-
-static ssize_t
-producer_poll(va_list args) {
-    rd_kafka_t *rd_producer = va_arg(args, rd_kafka_t *);
-    rd_kafka_poll(rd_producer, 1000);
-    return 0;
-}
-
-int
-lua_producer_poll(struct lua_State *L) {
-    if (lua_gettop(L) != 1)
-        luaL_error(L, "Usage: err = producer:poll()");
-
-    producer_t *producer = lua_check_producer(L, 1);
-    if (coio_call(producer_poll, producer->rd_producer) == -1) {
-        lua_pushstring(L, "unexpected error on producer poll");
-        return 1;
-    }
-    return 0;
 }
 
 int
@@ -348,12 +408,14 @@ producer_flush(va_list args) {
     return 0;
 }
 
-static rd_kafka_resp_err_t
-producer_close(struct lua_State *L, producer_t *producer) {
-    rd_kafka_resp_err_t err = RD_KAFKA_RESP_ERR_NO_ERROR;
-
+void
+destroy_producer(struct lua_State *L, producer_t *producer) {
     if (producer->rd_producer != NULL) {
         coio_call(producer_flush, producer->rd_producer);
+    }
+
+    if (producer->poller != NULL) {
+        destroy_producer_poller(producer->poller);
     }
 
     if (producer->topics != NULL) {
@@ -365,13 +427,12 @@ producer_close(struct lua_State *L, producer_t *producer) {
     }
 
     if (producer->rd_producer != NULL) {
-        // FIXME: if instance of consumer exists then kafka_destroy always hangs forever
+        // FIXME: if instance of producer exists then kafka_destroy always hangs forever
         /* Destroy handle */
 //        coio_call(kafka_destroy, producer->rd_producer);
     }
 
     free(producer);
-    return err;
 }
 
 int
@@ -382,18 +443,14 @@ lua_producer_close(struct lua_State *L) {
         return 1;
     }
 
-    rd_kafka_resp_err_t err = producer_close(L, *producer_p);
-    if (err) {
-        lua_pushboolean(L, 1);
-
-        const char *const_err_str = rd_kafka_err2str(err);
-        char err_str[512];
-        strcpy(err_str, const_err_str);
-        int fail = safe_pushstring(L, err_str);
-        return fail ? lua_push_error(L): 2;
+    if ((*producer_p)->rd_producer != NULL) {
+        coio_call(producer_flush, (*producer_p)->rd_producer);
     }
 
-    *producer_p = NULL;
+    if ((*producer_p)->poller != NULL) {
+        destroy_producer_poller((*producer_p)->poller);
+        (*producer_p)->poller = NULL;
+    }
     lua_pushboolean(L, 1);
     return 1;
 }
@@ -402,7 +459,7 @@ int
 lua_producer_gc(struct lua_State *L) {
     producer_t **producer_p = (producer_t **)luaL_checkudata(L, 1, producer_label);
     if (producer_p && *producer_p) {
-        producer_close(L, *producer_p);
+        destroy_producer(L, *producer_p);
     }
     if (producer_p)
         *producer_p = NULL;
@@ -527,11 +584,15 @@ lua_create_producer(struct lua_State *L) {
         return fail ? lua_push_error(L): 2;
     }
 
+    // creating background thread for polling consumer
+    producer_poller_t *poller = new_producer_poller(rd_producer);
+
     producer_t *producer;
     producer = malloc(sizeof(producer_t));
     producer->rd_producer = rd_producer;
     producer->topics = new_producer_topics(256);
     producer->event_queues = event_queues;
+    producer->poller = poller;
 
     producer_t **producer_p = (producer_t **)lua_newuserdata(L, sizeof(producer));
     *producer_p = producer;

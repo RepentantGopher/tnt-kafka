@@ -18,10 +18,18 @@
  */
 
 typedef struct {
+    rd_kafka_t      *rd_consumer;
+    pthread_t       thread;
+    pthread_attr_t  attr;
+    int             should_stop;
+    pthread_mutex_t lock;
+} consumer_poller_t;
+
+typedef struct {
     rd_kafka_t                      *rd_consumer;
     rd_kafka_topic_partition_list_t *topics;
-    rd_kafka_queue_t                *rd_msg_queue;
     event_queues_t                  *event_queues;
+    consumer_poller_t               *poller;
 } consumer_t;
 
 int lua_consumer_subscribe(struct lua_State *L);
@@ -30,13 +38,13 @@ int lua_consumer_unsubscribe(struct lua_State *L);
 
 int lua_consumer_tostring(struct lua_State *L);
 
-int lua_consumer_poll(struct lua_State *L);
-
 int lua_consumer_poll_msg(struct lua_State *L);
 
 int lua_consumer_poll_logs(struct lua_State *L);
 
 int lua_consumer_poll_errors(struct lua_State *L);
+
+int lua_consumer_poll_rebalances(struct lua_State *L);
 
 int lua_consumer_store_offset(struct lua_State *L);
 
