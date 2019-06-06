@@ -50,6 +50,9 @@ tarantoolctl rocks STATIC_BUILD=ON install kafka
     local log_callback = function(fac, str, level)
         log.info("got log: %d - %s - %s", level, fac, str)
     end
+    local rebalance_callback = function(msg)
+        log.info("got rebalance msg: %s", json.encode(msg))
+    end
 
     local consumer, err = tnt_kafka.Consumer.create({
         brokers = "localhost:9092", -- brokers for bootstrap
@@ -61,6 +64,7 @@ tarantoolctl rocks STATIC_BUILD=ON install kafka
         }, -- options for librdkafka
         error_callback = error_callback, -- optional callback for errors
         log_callback = log_callback, -- optional callback for logs and debug messages
+        rebalance_callback = rebalance_callback,  -- optional callback for rebalance messages
         default_topic_options = {
             ["auto.offset.reset"] = "earliest",
         }, -- optional default topic options
@@ -126,6 +130,9 @@ tarantoolctl rocks STATIC_BUILD=ON install kafka
     local log_callback = function(fac, str, level)
         log.info("got log: %d - %s - %s", level, fac, str)
     end
+    local rebalance_callback = function(msg)
+        log.info("got rebalance msg: %s", json.encode(msg))
+    end
 
     local consumer, err = tnt_kafka.Consumer.create({
         brokers = "localhost:9092", -- brokers for bootstrap
@@ -137,6 +144,7 @@ tarantoolctl rocks STATIC_BUILD=ON install kafka
         }, -- options for librdkafka
         error_callback = error_callback, -- optional callback for errors
         log_callback = log_callback, -- optional callback for logs and debug messages
+        rebalance_callback = rebalance_callback,  -- optional callback for rebalance messages
         default_topic_options = {
             ["auto.offset.reset"] = "earliest",
         }, -- optional default topic options
