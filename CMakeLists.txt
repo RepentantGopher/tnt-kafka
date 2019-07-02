@@ -21,7 +21,7 @@ endif()
 if("${STATIC_BUILD}" STREQUAL "ON" OR "$ENV{STATIC_BUILD}" STREQUAL "ON")
     add_custom_command(
         OUTPUT ${CMAKE_BINARY_DIR}/librdkafka/lib/librdkafka.a
-        COMMAND ./configure --prefix=${CMAKE_BINARY_DIR}/librdkafka
+        COMMAND ./configure --enable-ssl --prefix=${CMAKE_BINARY_DIR}/librdkafka
         COMMAND make -j
         COMMAND make install
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/librdkafka
@@ -32,7 +32,13 @@ if("${STATIC_BUILD}" STREQUAL "ON" OR "$ENV{STATIC_BUILD}" STREQUAL "ON")
         DEPENDS ${CMAKE_BINARY_DIR}/librdkafka/lib/librdkafka.a
     )
 
-    set(RDKAFKA_LIBRARY ${CMAKE_BINARY_DIR}/librdkafka/lib/librdkafka.a)
+    find_package(OpenSSL REQUIRED)
+    if(OPENSSL_FOUND)
+        message("Found OPENSSL version: ${OPENSSL_VERSION}")
+        set(RDKAFKA_LIBRARY ${RDKAFKA_LIBRARY} ${OPENSSL_CRYPTO_LIBRARY} ${OPENSSL_SSL_LIBRARY})
+    endif()
+
+    set(RDKAFKA_LIBRARY  ${RDKAFKA_LIBRARY} ${CMAKE_BINARY_DIR}/librdkafka/lib/librdkafka.a)
     set(RDKAFKA_INCLUDE_DIR ${CMAKE_BINARY_DIR}/librdkafka/include)
 else()
     set(RDKAFKA_FIND_REQUIRED ON)
