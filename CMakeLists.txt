@@ -18,7 +18,10 @@ if(${tntver} VERSION_LESS 1.7.4.291)
     message(FATAL_ERROR "Tarantool >= 1.7.4-291 is required")
 endif()
 
-if("${STATIC_BUILD}" STREQUAL "ON" OR "$ENV{STATIC_BUILD}" STREQUAL "ON")
+set(STATIC_BUILD "OFF", CACHE BOOL "Link dependencies statically?")
+set(WITH_OPENSSL_1_1 "OFF" CACHE BOOL "Require openssl version >= 1.1?")
+
+if(STATIC_BUILD)
     add_custom_command(
         OUTPUT ${CMAKE_BINARY_DIR}/librdkafka/lib/librdkafka.a
         COMMAND ./configure --enable-ssl --prefix=${CMAKE_BINARY_DIR}/librdkafka
@@ -32,7 +35,12 @@ if("${STATIC_BUILD}" STREQUAL "ON" OR "$ENV{STATIC_BUILD}" STREQUAL "ON")
         DEPENDS ${CMAKE_BINARY_DIR}/librdkafka/lib/librdkafka.a
     )
 
-    find_package(OpenSSL REQUIRED)
+    if (WITH_OPENSSL_1_1)
+        find_package(OpenSSL 1.1 REQUIRED)
+    else()
+        find_package(OpenSSL REQUIRED)
+    endif()
+
     if(OPENSSL_FOUND)
         message("Found OPENSSL version: ${OPENSSL_VERSION}")
         set(RDKAFKA_LIBRARY ${RDKAFKA_LIBRARY} ${OPENSSL_CRYPTO_LIBRARY} ${OPENSSL_SSL_LIBRARY})
