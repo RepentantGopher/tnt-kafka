@@ -21,6 +21,13 @@ endif()
 set(STATIC_BUILD "OFF", CACHE BOOL "Link dependencies statically?")
 set(WITH_OPENSSL_1_1 "OFF" CACHE BOOL "Require openssl version >= 1.1?")
 
+if (WITH_OPENSSL_1_1)
+    find_package(OpenSSL 1.1 REQUIRED)
+else()
+    find_package(OpenSSL REQUIRED)
+endif()
+message("Found OPENSSL version: ${OPENSSL_VERSION}")
+
 if(STATIC_BUILD)
     add_custom_command(
         OUTPUT ${CMAKE_BINARY_DIR}/librdkafka/lib/librdkafka.a
@@ -35,22 +42,14 @@ if(STATIC_BUILD)
         DEPENDS ${CMAKE_BINARY_DIR}/librdkafka/lib/librdkafka.a
     )
 
-    if (WITH_OPENSSL_1_1)
-        find_package(OpenSSL 1.1 REQUIRED)
-    else()
-        find_package(OpenSSL REQUIRED)
-    endif()
-
-    if(OPENSSL_FOUND)
-        message("Found OPENSSL version: ${OPENSSL_VERSION}")
-        set(RDKAFKA_LIBRARY ${RDKAFKA_LIBRARY} ${OPENSSL_CRYPTO_LIBRARY} ${OPENSSL_SSL_LIBRARY})
-    endif()
 
     set(RDKAFKA_LIBRARY  ${RDKAFKA_LIBRARY} ${CMAKE_BINARY_DIR}/librdkafka/lib/librdkafka.a)
     set(RDKAFKA_INCLUDE_DIR ${CMAKE_BINARY_DIR}/librdkafka/include)
 else()
     set(RDKAFKA_FIND_REQUIRED ON)
     find_package(RdKafka)
+    # Link RdKafka transitive dependencies manually
+    set(RDKAFKA_LIBRARY ${RDKAFKA_LIBRARY} ${OPENSSL_CRYPTO_LIBRARY} ${OPENSSL_SSL_LIBRARY})
 endif()
 
 include_directories(${TARANTOOL_INCLUDE_DIRS})
