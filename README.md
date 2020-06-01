@@ -16,6 +16,8 @@ non critical errors as strings which allows you to decide how to handle it.
 * Tarantool development headers 
 * librdkafka >= 0.11.5
 * librdkafka development headers
+* openssl-libs
+* openssl development headers
 * make
 * cmake
 * gcc 
@@ -319,6 +321,12 @@ because `rd_kafka_destroy` sometimes hangs forever.
 * Better documentation
 
 # Benchmarks
+
+Before any commands init and updated git submodule
+```bash
+    git submodule init
+    git submodule update
+```
 
 ## Producer
 
