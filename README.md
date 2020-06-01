@@ -16,6 +16,8 @@ non critical errors as strings which allows you to decide how to handle it.
 * Tarantool development headers 
 * librdkafka >= 0.11.5
 * librdkafka development headers
+* openssl-libs
+* openssl development headers
 * make
 * cmake
 * gcc 
