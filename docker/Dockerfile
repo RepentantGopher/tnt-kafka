@@ -7,13 +7,16 @@ RUN yum install -y cmake \
                    gcc-c++ \
                    cyrus-sasl-lib \
                    openssl-libs \
+                   openssl-devel \
                    tarantool-devel
+
 
 ADD . /opt/tarantool
 
 WORKDIR /opt/tarantool
 
 ENV STATIC_BUILD ON
+ENV WITH_OPENSSL_1_1 OFF
 
 RUN cmake .
 

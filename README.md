@@ -320,6 +320,12 @@ because `rd_kafka_destroy` sometimes hangs forever.
 
 # Benchmarks
 
+Before any commands init and updated git submodule
+```bash
+    git submodule init
+    git submodule update
+```
+
 ## Producer
 
 ### Async
