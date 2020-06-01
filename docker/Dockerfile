@@ -10,7 +10,6 @@ RUN yum install -y cmake \
                    openssl-devel \
                    tarantool-devel
 
-
 ADD . /opt/tarantool
 
 WORKDIR /opt/tarantool
