@@ -334,17 +334,16 @@ lua_producer_produce(struct lua_State *L) {
     lua_gettable(L, -2 );
     // rd_kafka will copy key so no need to worry about this cast
     char *key = (char *)lua_tostring(L, -1);
+    size_t key_len = key != NULL ? lua_strlen(L, -1) : 0;
     lua_pop(L, 1);
-
-    size_t key_len = key != NULL ? strlen(key) : 0;
 
     lua_pushstring(L, "value");
     lua_gettable(L, -2 );
     // rd_kafka will copy value so no need to worry about this cast
     char *value = (char *)lua_tostring(L, -1);
-    lua_pop(L, 1);
 
-    size_t value_len = value != NULL ? strlen(value) : 0;
+    size_t value_len = value != NULL ? lua_strlen(L, -1) : 0;
+    lua_pop(L, 1);
 
     if (key == NULL && value == NULL) {
         int fail = safe_pushstring(L, "producer message must contains non nil key or value");
