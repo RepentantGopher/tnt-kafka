@@ -46,9 +46,14 @@ consumer_poll_loop(void *arg) {
                     // FIXME: push errors to error queue?
                     rd_kafka_message_destroy(rd_msg);
                 } else {
+                    msg_t *msg = new_consumer_msg(rd_msg);
+                    // free rdkafka message instantly to prevent hang on close / destroy consumer
+                    rd_kafka_message_destroy(rd_msg);
+                    rd_msg = NULL;
+
                     pthread_mutex_lock(&event_queues->consume_queue->lock);
 
-                    queue_lockfree_push(event_queues->consume_queue, rd_msg);
+                    queue_lockfree_push(event_queues->consume_queue, msg);
                     count = event_queues->consume_queue->count;
 
                     pthread_mutex_unlock(&event_queues->consume_queue->lock);
@@ -225,17 +230,13 @@ lua_consumer_poll_msg(struct lua_State *L) {
     int msgs_limit = lua_tonumber(L, 2);
 
     lua_createtable(L, msgs_limit, 0);
-    rd_kafka_message_t *rd_msg = NULL;
+    msg_t *msg = NULL;
     while (msgs_limit > counter) {
-        rd_msg = queue_pop(consumer->event_queues->consume_queue);
-        if (rd_msg == NULL) {
+        msg = queue_pop(consumer->event_queues->consume_queue);
+        if (msg == NULL) {
             break;
         }
         counter += 1;
-
-        msg_t *msg;
-        msg = malloc(sizeof(msg_t));
-        msg->rd_message = rd_msg;
 
         msg_t **msg_p = (msg_t **)lua_newuserdata(L, sizeof(msg));
         *msg_p = msg;
@@ -500,7 +501,7 @@ lua_consumer_store_offset(struct lua_State *L) {
         luaL_error(L, "Usage: err = consumer:store_offset(msg)");
 
     msg_t *msg = lua_check_consumer_msg(L, 2);
-    rd_kafka_resp_err_t err = rd_kafka_offset_store(msg->rd_message->rkt, msg->rd_message->partition, msg->rd_message->offset);
+    rd_kafka_resp_err_t err = rd_kafka_offset_store(msg->topic, msg->partition, msg->offset);
     if (err) {
         const char *const_err_str = rd_kafka_err2str(err);
         char err_str[512];
@@ -523,17 +524,20 @@ wait_consumer_close(va_list args) {
     return 0;
 }
 
+static ssize_t
+wait_consumer_destroy(va_list args) {
+    rd_kafka_t *rd_kafka = va_arg(args, rd_kafka_t *);
+    // prevents hanging forever
+    rd_kafka_destroy_flags(rd_kafka, RD_KAFKA_DESTROY_F_NO_CONSUMER_CLOSE);
+    return 0;
+}
+
 static rd_kafka_resp_err_t
 consumer_destroy(struct lua_State *L, consumer_t *consumer) {
     rd_kafka_resp_err_t err = RD_KAFKA_RESP_ERR_NO_ERROR;
 
     if (consumer->topics != NULL) {
         rd_kafka_topic_partition_list_destroy(consumer->topics);
-    }
-
-    // trying to close in background until success
-    while (coio_call(wait_consumer_close, consumer->rd_consumer) == -1) {
-        // FIXME: maybe send errors to error queue?
     }
 
     if (consumer->poller != NULL) {
@@ -547,7 +551,7 @@ consumer_destroy(struct lua_State *L, consumer_t *consumer) {
     if (consumer->rd_consumer != NULL) {
         /* Destroy handle */
         // FIXME: kafka_destroy hangs forever
-//        coio_call(kafka_destroy, consumer->rd_consumer);
+        coio_call(wait_consumer_destroy, consumer->rd_consumer);
     }
 
     free(consumer);
@@ -563,14 +567,12 @@ lua_consumer_close(struct lua_State *L) {
         return 1;
     }
 
+    rd_kafka_commit((*consumer_p)->rd_consumer, NULL, 0); // sync commit of current offsets
+    rd_kafka_unsubscribe((*consumer_p)->rd_consumer);
+
     // trying to close in background until success
     while (coio_call(wait_consumer_close, (*consumer_p)->rd_consumer) == -1) {
         // FIXME: maybe send errors to error queue?
-    }
-
-    if ((*consumer_p)->poller != NULL) {
-        destroy_consumer_poller((*consumer_p)->poller);
-        (*consumer_p)->poller = NULL;
     }
 
     lua_pushboolean(L, 1);
@@ -578,7 +580,7 @@ lua_consumer_close(struct lua_State *L) {
 }
 
 int
-lua_consumer_gc(struct lua_State *L) {
+lua_consumer_destroy(struct lua_State *L) {
     consumer_t **consumer_p = (consumer_t **)luaL_checkudata(L, 1, consumer_label);
     if (consumer_p && *consumer_p) {
         consumer_destroy(L, *consumer_p);

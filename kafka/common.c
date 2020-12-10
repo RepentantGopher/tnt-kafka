@@ -2,6 +2,8 @@
 #include <lualib.h>
 #include <lauxlib.h>
 
+#include <tarantool/module.h>
+
 #include <common.h>
 
 const char* const consumer_label = "__tnt_kafka_consumer";

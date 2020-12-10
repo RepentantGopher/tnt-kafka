@@ -100,6 +100,8 @@ local function consume(timeout)
                 if err ~= nil then
                     log.error("got error '%s' while commiting msg from topic '%s'", err, msg:topic())
                 end
+            else
+                fiber.sleep(0.2)
             end
         end
     end)

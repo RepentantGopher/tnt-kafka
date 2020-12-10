@@ -48,18 +48,6 @@ function Consumer.create(config)
     return new, nil
 end
 
-function Consumer:_poll()
-    local err
-    while true do
-        err = self._consumer:poll()
-        if err ~= nil then
-            log.error(err)
-        end
-    end
-end
-
-jit.off(Consumer._poll)
-
 function Consumer:_poll_msg()
     local msgs
     while true do
@@ -136,15 +124,15 @@ end
 jit.off(Consumer._poll_rebalances)
 
 function Consumer:close()
-    self._poll_msg_fiber:cancel()
-    self._output_ch:close()
-
-    fiber.yield()
-
     local ok, err = self._consumer:close()
     if err ~= nil then
         return ok, err
     end
+
+    self._poll_msg_fiber:cancel()
+    self._output_ch:close()
+
+    fiber.yield()
 
     if self._poll_logs_fiber ~= nil then
         self._poll_logs_fiber:cancel()
@@ -155,6 +143,8 @@ function Consumer:close()
     if self._poll_rebalances_fiber ~= nil then
         self._poll_rebalances_fiber:cancel()
     end
+
+    self._consumer:destroy()
 
     self._consumer = nil
 
@@ -312,6 +302,8 @@ function Producer:close()
     if self._poll_errors_fiber ~= nil then
         self._poll_errors_fiber:cancel()
     end
+
+    self._producer:destroy()
 
     self._producer = nil
 

@@ -55,8 +55,8 @@ int lua_producer_produce(struct lua_State *L);
 
 int lua_producer_close(struct lua_State *L);
 
-int lua_producer_gc(struct lua_State *L);
-
 int lua_create_producer(struct lua_State *L);
+
+int lua_producer_destroy(struct lua_State *L);
 
 #endif //TNT_KAFKA_PRODUCER_H

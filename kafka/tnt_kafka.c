@@ -25,8 +25,8 @@ luaopen_kafka_tntkafka(lua_State *L) {
             {"poll_rebalances", lua_consumer_poll_rebalances},
             {"store_offset", lua_consumer_store_offset},
             {"close", lua_consumer_close},
+            {"destroy", lua_consumer_destroy},
             {"__tostring", lua_consumer_tostring},
-            {"__gc", lua_consumer_gc},
             {NULL, NULL}
     };
 
@@ -63,8 +63,8 @@ luaopen_kafka_tntkafka(lua_State *L) {
             {"poll_logs", lua_producer_poll_logs},
             {"poll_errors", lua_producer_poll_errors},
             {"close", lua_producer_close},
+            {"destroy", lua_producer_destroy},
             {"__tostring", lua_producer_tostring},
-            {"__gc", lua_producer_gc},
             {NULL, NULL}
     };
 

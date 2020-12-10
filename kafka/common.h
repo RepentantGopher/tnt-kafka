@@ -14,6 +14,8 @@
 #include <lualib.h>
 #include <lauxlib.h>
 
+#include <tarantool/module.h>
+
 const char* const consumer_label;
 const char* const consumer_msg_label;
 const char* const producer_label;
