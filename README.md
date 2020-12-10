@@ -379,6 +379,11 @@ Local run in docker:
 # Developing
 
 ## Tests
+Before run any test you should add to `/etc/hosts` entry
+```
+127.0.0.1 kafka
+```
+
 You can run docker based integration tests via makefile target
 ```bash
     make test-run-with-docker

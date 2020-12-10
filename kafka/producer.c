@@ -408,6 +408,13 @@ producer_flush(va_list args) {
     return 0;
 }
 
+static ssize_t
+wait_producer_destroy(va_list args) {
+    rd_kafka_t *rd_kafka = va_arg(args, rd_kafka_t *);
+    rd_kafka_destroy(rd_kafka);
+    return 0;
+}
+
 void
 destroy_producer(struct lua_State *L, producer_t *producer) {
     if (producer->rd_producer != NULL) {
@@ -427,9 +434,8 @@ destroy_producer(struct lua_State *L, producer_t *producer) {
     }
 
     if (producer->rd_producer != NULL) {
-        // FIXME: if instance of producer exists then kafka_destroy always hangs forever
         /* Destroy handle */
-//        coio_call(kafka_destroy, producer->rd_producer);
+        coio_call(wait_producer_destroy, producer->rd_producer);
     }
 
     free(producer);
@@ -451,12 +457,13 @@ lua_producer_close(struct lua_State *L) {
         destroy_producer_poller((*producer_p)->poller);
         (*producer_p)->poller = NULL;
     }
+
     lua_pushboolean(L, 1);
     return 1;
 }
 
 int
-lua_producer_gc(struct lua_State *L) {
+lua_producer_destroy(struct lua_State *L) {
     producer_t **producer_p = (producer_t **)luaL_checkudata(L, 1, producer_label);
     if (producer_p && *producer_p) {
         destroy_producer(L, *producer_p);
