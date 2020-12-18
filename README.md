@@ -4,14 +4,14 @@ Full featured high performance kafka library for Tarantool based on [librdkafka]
 
 Can produce more then 150k messages per second and consume more then 140k messages per second.
 
-# Features
+## Features
 * Kafka producer and consumer implementations.
 * Fiber friendly.
 * Mostly errorless functions and methods. Error handling in Tarantool ecosystem is quite a mess, 
 some libraries throws lua native `error` while others throws `box.error` instead. `kafka` returns 
 non critical errors as strings which allows you to decide how to handle it.
 
-# Requirements 
+## Requirements 
 * Tarantool >= 1.10.2
 * Tarantool development headers 
 * librdkafka >= 0.11.5
@@ -22,12 +22,12 @@ non critical errors as strings which allows you to decide how to handle it.
 * cmake
 * gcc 
 
-# Installation
+## Installation
 ```bash
     tarantoolctl rocks install kafka
 ```
 
-## Build module with statically linked librdkafka
+### Build module with statically linked librdkafka
 
 To install kafka module with builtin librdkafka dependency, use option `STATIC_BUILD`:
 
@@ -35,292 +35,143 @@ To install kafka module with builtin librdkafka dependency, use option `STATIC_B
 tarantoolctl rocks STATIC_BUILD=ON install kafka
 ```
 
-# Examples
+## Usage
 
-## Consumer
-
-### With auto offset store
+Consumer
 ```lua
-    local fiber = require('fiber')
-    local os = require('os')
-    local log = require('log')
-    local tnt_kafka = require('kafka')
-    
-    local error_callback = function(err)
-        log.error("got error: %s", err)
-    end
-    local log_callback = function(fac, str, level)
-        log.info("got log: %d - %s - %s", level, fac, str)
-    end
-    local rebalance_callback = function(msg)
-        log.info("got rebalance msg: %s", json.encode(msg))
-    end
+local os = require('os')
+local log = require('log')
+local tnt_kafka = require('kafka')
 
-    local consumer, err = tnt_kafka.Consumer.create({
-        brokers = "localhost:9092", -- brokers for bootstrap
-        options = {
-            ["enable.auto.offset.store"] = "true",
-            ["group.id"] = "example_consumer",
-            ["auto.offset.reset"] = "earliest",
-            ["enable.partition.eof"] = "false"
-        }, -- options for librdkafka
-        error_callback = error_callback, -- optional callback for errors
-        log_callback = log_callback, -- optional callback for logs and debug messages
-        rebalance_callback = rebalance_callback,  -- optional callback for rebalance messages
-        default_topic_options = {
-            ["auto.offset.reset"] = "earliest",
-        }, -- optional default topic options
-    })
-    if err ~= nil then
-        print(err)
+local consumer, err = tnt_kafka.Consumer.create({ brokers = "localhost:9092" })
+if err ~= nil then
+    print(err)
+    os.exit(1)
+end
+
+local err = consumer:subscribe({ "some_topic" })
+if err ~= nil then
+    print(err)
+    os.exit(1)
+end
+
+local out, err = consumer:output()
+if err ~= nil then
+    print(string.format("got fatal error '%s'", err))
+    os.exit(1)
+end
+
+while true do
+    if out:is_closed() then
         os.exit(1)
     end
 
-    local err = consumer:subscribe({"test_topic"}) -- array of topics to subscribe
-    if err ~= nil then
-        print(err)
-        os.exit(1)
+    local msg = out:get()
+    if msg ~= nil then
+        print(string.format(
+            "got msg with topic='%s' partition='%s' offset='%s' key='%s' value='%s'",
+            msg:topic(), msg:partition(), msg:offset(), msg:key(), msg:value()
+        ))
     end
-    
-    fiber.create(function()
-        local out, err = consumer:output()
-        if err ~= nil then
-            print(string.format("got fatal error '%s'", err))
-            return
-        end
-        
-        while true do
-            if out:is_closed() then
-                return
-            end
+end
 
-            local msg = out:get()
-            if msg ~= nil then
-                print(string.format(
-                    "got msg with topic='%s' partition='%s' offset='%s' key='%s' value='%s'", 
-                    msg:topic(), msg:partition(), msg:offset(), msg:key(), msg:value()
-                ))
-            end
-        end
-    end)
-    
-    fiber.sleep(10)
-    
-    local err = consumer:unsubscribe({"test_topic"}) -- array of topics to unsubscribe
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-    
-    local err = consumer:close() -- always stop consumer to commit all pending offsets before app close
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
+-- from another fiber on app shutdown
+consumer:close()
 ```
 
-### With multiple fibers and manual offset store
+Producer
 ```lua
-    local fiber = require('fiber')
-    local os = require('os')
-    local log = require('log')
-    local tnt_kafka = require('kafka')
-    
-    local error_callback = function(err)
-        log.error("got error: %s", err)
-    end
-    local log_callback = function(fac, str, level)
-        log.info("got log: %d - %s - %s", level, fac, str)
-    end
-    local rebalance_callback = function(msg)
-        log.info("got rebalance msg: %s", json.encode(msg))
-    end
+local os = require('os')
+local log = require('log')
+local tnt_kafka = require('kafka')
 
-    local consumer, err = tnt_kafka.Consumer.create({
-        brokers = "localhost:9092", -- brokers for bootstrap
-        options = {
-            ["enable.auto.offset.store"] = "false",
-            ["group.id"] = "example_consumer",
-            ["auto.offset.reset"] = "earliest",
-            ["enable.partition.eof"] = "false"
-        }, -- options for librdkafka
-        error_callback = error_callback, -- optional callback for errors
-        log_callback = log_callback, -- optional callback for logs and debug messages
-        rebalance_callback = rebalance_callback,  -- optional callback for rebalance messages
-        default_topic_options = {
-            ["auto.offset.reset"] = "earliest",
-        }, -- optional default topic options
+local producer, err = tnt_kafka.Producer.create({ brokers = "kafka:9092" })
+if err ~= nil then
+    print(err)
+    os.exit(1)
+end
+
+for i = 1, 1000 do
+    local message = "test_value " .. tostring(i)
+    local err = producer:produce({
+        topic = "test_topic",
+        key = "test_key",
+        value =  message
     })
     if err ~= nil then
-        print(err)
-        os.exit(1)
+        print(string.format("got error '%s' while sending value '%s'", err, message))
+    else
+        print(string.format("successfully sent value '%s'", message))
     end
+end
 
-    local err = consumer:subscribe({"test_topic"}) -- array of topics to subscribe
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-    
-    for i = 1, 10 do
-        fiber.create(function()
-            local out, err = consumer:output()
-            if err ~= nil then
-                print(string.format("got fatal error '%s'", err))
-                return
-            end
-            while true do
-                if out:is_closed() then
-                    return
-                end
-    
-                local msg = out:get()
-                if msg ~= nil then
-                    print(string.format(
-                        "got msg with topic='%s' partition='%s' offset='%s' key='%s' value='%s'", 
-                        msg:topic(), msg:partition(), msg:offset(), msg:key(), msg:value()
-                    ))
-                    
-                    local err = consumer:store_offset(msg) -- don't forget to commit processed messages
-                    if err ~= nil then
-                        print(string.format(
-                            "got error '%s' while commiting msg from topic '%s'", 
-                            err, msg:topic()
-                        ))
-                    end
-                end
-            end
-        end)
-    end    
-    
-    fiber.sleep(10)
-    
-    local err = consumer:unsubscribe({"test_topic"}) -- array of topics to unsubscribe
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-    
-    local err = consumer:close() -- always stop consumer to commit all pending offsets before app close
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
+producer:close()
 ```
 
-## Producer
-
-### With single fiber and async producer
-
+You can pass additional configuration parameters for librdkafka 
+https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md in special table `options` on client creation:
 ```lua
-    local os = require('os')
-    local log = require('log')
-    local tnt_kafka = require('kafka')
-    
-    local error_callback = function(err)
-        log.error("got error: %s", err)
-    end
-    local log_callback = function(fac, str, level)
-        log.info("got log: %d - %s - %s", level, fac, str)
-    end
-    
-    local producer, err = tnt_kafka.Producer.create({
-        brokers = "kafka:9092", -- brokers for bootstrap
-        options = {}, -- options for librdkafka
-        error_callback = error_callback, -- optional callback for errors
-        log_callback = log_callback, -- optional callback for logs and debug messages
-        default_topic_options = {
-            ["partitioner"] = "murmur2_random",
-        }, -- optional default topic options
-    })
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-    
-    for i = 1, 1000 do    
-        local err = producer:produce_async({ -- don't wait until message will be delivired to kafka
-            topic = "test_topic",
-            key = "test_key",
-            value = "test_value" -- only strings allowed
-        })
-        if err ~= nil then
-            print(err)
-            os.exit(1)
-        end
-    end
-    
-    local err = producer:close() -- always stop consumer to send all pending messages before app close
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
+tnt_kafka.Producer.create({
+    options = {
+        ["some.key"] = "some_value",
+    },
+})
+
+tnt_kafka.Consumer.create({
+    options = {
+        ["some.key"] = "some_value",
+    },
+})
 ```
 
-### With multiple fibers and sync producer
+More examples in `examples` folder.
+
+## Using SSL
+
+Connection to brokers using SSL supported by librdkafka itself so you only need to properly configure brokers by 
+using this guide https://github.com/edenhill/librdkafka/wiki/Using-SSL-with-librdkafka
+
+After that you only need to pass following configuration parameters on client creation:
 ```lua
-    local fiber = require('fiber')
-    local os = require('os')
-    local log = require('log')
-    local tnt_kafka = require('kafka')
-    
-    local error_callback = function(err)
-        log.error("got error: %s", err)
-    end
-    local log_callback = function(fac, str, level)
-        log.info("got log: %d - %s - %s", level, fac, str)
-    end
-    
-    local producer, err = tnt_kafka.Producer.create({
-        brokers = "kafka:9092", -- brokers for bootstrap
-        options = {}, -- options for librdkafka
-        error_callback = error_callback, -- optional callback for errors
-        log_callback = log_callback, -- optional callback for logs and debug messages
-        default_topic_options = {
-            ["partitioner"] = "murmur2_random",
-        }, -- optional default topic options
-    })
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
-    
-    for i = 1, 1000 do
-        fiber.create(function()
-            local message = "test_value " .. tostring(i)
-            local err = producer:produce({ -- wait until message will be delivired to kafka (using channel under the hood)
-                topic = "test_topic",
-                key = "test_key", 
-                value =  message -- only strings allowed
-            })
-            if err ~= nil then
-                print(string.format("got error '%s' while sending value '%s'", err, message))
-            else
-                print(string.format("successfully sent value '%s'", message))
-            end
-        end)
-    end
-    
-    fiber.sleep(10)
-    
-    local err = producer:close() -- always stop consumer to send all pending messages before app close
-    if err ~= nil then
-        print(err)
-        os.exit(1)
-    end
+tnt_kafka.Producer.create({
+    brokers = "broker_list",
+    options = {
+        ["security.protocol"] = "ssl",
+        -- CA certificate file for verifying the broker's certificate.
+        ["ssl.ca.location"] = "ca-cert",
+        -- Client's certificate
+        ["ssl.certificate.location"] = "client_?????_client.pem",
+        -- Client's key
+        ["ssl.key.location"] = "client_?????_client.key",
+        -- Key password, if any
+        ["ssl.key.password"] = "abcdefgh",
+    },
+})
+
+tnt_kafka.Consumer.create({
+    brokers = "broker_list",
+    options = {
+        ["security.protocol"] = "ssl",
+        -- CA certificate file for verifying the broker's certificate.
+        ["ssl.ca.location"] = "ca-cert",
+        -- Client's certificate
+        ["ssl.certificate.location"] = "client_?????_client.pem",
+        -- Client's key
+        ["ssl.key.location"] = "client_?????_client.key",
+        -- Key password, if any
+        ["ssl.key.password"] = "abcdefgh",
+    },
+})
 ```
 
-# Known issues
-* Consumer and Producer leaves some non gc'able objects in memory after has been stopped. It was done intentionally
-because `rd_kafka_destroy` sometimes hangs forever.
+## Known issues
 
-# TODO
+## TODO
 * Ordered storage for offsets to prevent commits unprocessed messages
-* Fix known issues
 * More examples
 * Better documentation
 
-# Benchmarks
+## Benchmarks
 
 Before any commands init and updated git submodule
 ```bash
@@ -328,9 +179,9 @@ Before any commands init and updated git submodule
     git submodule update
 ```
 
-## Producer
+### Producer
 
-### Async
+#### Async
 
 Result: over 160000 produced messages per second on macbook pro 2016
 
@@ -341,7 +192,7 @@ Local run in docker:
     make docker-run-benchmark-async-producer-interactive
 ```
 
-### Sync
+#### Sync
 
 Result: over 90000 produced messages per second on macbook pro 2016
 
@@ -352,9 +203,9 @@ Local run in docker:
     make docker-run-benchmark-sync-producer-interactive
 ```
 
-## Consumer
+### Consumer
 
-### Auto offset store enabled
+#### Auto offset store enabled
 
 Result: over 190000 consumed messages per second on macbook pro 2016
 
@@ -365,7 +216,7 @@ Local run in docker:
     make docker-run-benchmark-auto-offset-store-consumer-interactive
 ```
 
-### Manual offset store
+#### Manual offset store
 
 Result: over 190000 consumed messages per second on macbook pro 2016
 
@@ -376,9 +227,9 @@ Local run in docker:
     make docker-run-benchmark-manual-commit-consumer-interactive
 ```
 
-# Developing
+## Developing
 
-## Tests
+### Tests
 Before run any test you should add to `/etc/hosts` entry
 ```
 127.0.0.1 kafka
