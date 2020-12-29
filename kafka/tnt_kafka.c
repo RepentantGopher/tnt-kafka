@@ -80,6 +80,7 @@ luaopen_kafka_tntkafka(lua_State *L) {
 	static const struct luaL_Reg meta [] = {
         {"create_consumer", lua_create_consumer},
         {"create_producer", lua_create_producer},
+        {"librdkafka_version", lua_librdkafka_version},
         {NULL, NULL}
 	};
 	luaL_register(L, NULL, meta);

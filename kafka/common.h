@@ -24,6 +24,8 @@ int save_pushstring_wrapped(struct lua_State *L);
 
 int safe_pushstring(struct lua_State *L, char *str);
 
+int lua_librdkafka_version(struct lua_State *L);
+
 /**
  * Push native lua error with code -3
  */

@@ -1,8 +1,5 @@
 #include <lua.h>
-#include <lualib.h>
-#include <lauxlib.h>
-
-#include <tarantool/module.h>
+#include <librdkafka/rdkafka.h>
 
 #include <common.h>
 
@@ -32,4 +29,14 @@ lua_push_error(struct lua_State *L) {
     lua_pushnumber(L, -3);
     lua_insert(L, -2);
     return 2;
+}
+
+/**
+ * Push current librdkafka version
+ */
+int
+lua_librdkafka_version(struct lua_State *L) {
+	const char *version = rd_kafka_version_str();
+	lua_pushstring(L, version);
+	return 1;
 }
