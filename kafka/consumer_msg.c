@@ -122,6 +122,11 @@ new_consumer_msg(rd_kafka_message_t *rd_message) {
     msg = malloc(sizeof(msg_t));
     msg->topic = rd_message->rkt;
     msg->partition = rd_message->partition;
+    msg->value = NULL;
+    msg->value_len = 0;
+    msg->key = NULL;
+    msg->key_len = 0;
+    msg->offset = 0;
 
     // value
     if (rd_message->len > 0) {
