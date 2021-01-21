@@ -35,6 +35,13 @@ To install kafka module with builtin librdkafka dependency, use option `STATIC_B
 tarantoolctl rocks STATIC_BUILD=ON install kafka
 ```
 
+Be aware, that this approach doesn't include static openssl.
+Instead, it assumes tarantool has openssl symbols exported.
+That means, kafka static build is only usable with static tarantool build.
+
+For successful static build you need to compile kafka
+against the [same version of openssl](https://github.com/tarantool/tarantool/blob/800e5ed617f7cd352ec597ce16973c7e4cad76c8/static-build/CMakeLists.txt#L11) that tarantool does.
+
 ## Usage
 
 Consumer
