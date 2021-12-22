@@ -107,6 +107,7 @@ new_queue() {
 
     pthread_mutex_t lock;
     if (pthread_mutex_init(&lock, NULL) != 0) {
+        free(queue);
         return NULL;
     }
 
