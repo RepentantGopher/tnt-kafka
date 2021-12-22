@@ -156,6 +156,7 @@ rebalance_msg_t *new_rebalance_revoke_msg(rd_kafka_topic_partition_list_t *revok
 
     pthread_mutex_t lock;
     if (pthread_mutex_init(&lock, NULL) != 0) {
+        free(msg);
         return NULL;
     }
 
@@ -163,6 +164,7 @@ rebalance_msg_t *new_rebalance_revoke_msg(rd_kafka_topic_partition_list_t *revok
 
     pthread_cond_t sync;
     if (pthread_cond_init(&sync, NULL) != 0) {
+        free(msg);
         return NULL;
     }
 
@@ -181,6 +183,7 @@ rebalance_msg_t *new_rebalance_assign_msg(rd_kafka_topic_partition_list_t *assig
 
     pthread_mutex_t lock;
     if (pthread_mutex_init(&lock, NULL) != 0) {
+        free(msg);
         return NULL;
     }
 
@@ -188,6 +191,7 @@ rebalance_msg_t *new_rebalance_assign_msg(rd_kafka_topic_partition_list_t *assig
 
     pthread_cond_t sync;
     if (pthread_cond_init(&sync, NULL) != 0) {
+        free(msg);
         return NULL;
     }
 
@@ -206,6 +210,7 @@ rebalance_msg_t *new_rebalance_error_msg(rd_kafka_resp_err_t err) {
 
     pthread_mutex_t lock;
     if (pthread_mutex_init(&lock, NULL) != 0) {
+        free(msg);
         return NULL;
     }
 
@@ -213,6 +218,7 @@ rebalance_msg_t *new_rebalance_error_msg(rd_kafka_resp_err_t err) {
 
     pthread_cond_t sync;
     if (pthread_cond_init(&sync, NULL) != 0) {
+        free(msg);
         return NULL;
     }
 
