@@ -26,12 +26,11 @@ jobs:
       # Make a release
       - run: echo TAG=${GITHUB_REF##*/} >> $GITHUB_ENV
       - run: tarantoolctl rocks new_version --tag ${{ env.TAG }}
-      - run: tarantoolctl rocks install kafka-${{ env.TAG }}-1.rockspec
-      - run: tarantoolctl rocks pack kafka ${{ env.TAG }}
+      - run: tarantoolctl rocks pack kafka-${{ env.TAG }}-1.rockspec
 
       - uses: tarantool/rocks.tarantool.org/github-action@master
         with:
           auth: ${{ secrets.ROCKS_AUTH }}
           files: |
             kafka-${{ env.TAG }}-1.rockspec
-            kafka-${{ env.TAG }}-1.all.rock
+            kafka-${{ env.TAG }}-1.src.rock
