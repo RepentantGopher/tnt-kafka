@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+find_program(GIT git)
 
 project(kafka C)
 
@@ -33,6 +34,15 @@ if (APPLE)
     set(LIBRDKAFKA_CXX_FLAGS "${LIBRDKAFKA_CXX_FLAGS} ${CMAKE_C_SYSROOT_FLAG} ${CMAKE_OSX_SYSROOT}")
     set(LIBRDKAFKA_C_FLAGS "${LIBRDKAFKA_C_FLAGS} ${CMAKE_C_SYSROOT_FLAG} ${CMAKE_OSX_SYSROOT}")
 endif()
+
+set(PATCH_FILENAME "security36.patch")
+execute_process(
+    COMMAND ${GIT} apply ${CMAKE_SOURCE_DIR}/patch/${PATCH_FILENAME}
+    OUTPUT_VARIABLE PATCH_LOG
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/librdkafka
+)
+message(STATUS "git apply patch ${PATCH_FILENAME} ${PATCH_LOG}")
 
 if(STATIC_BUILD)
     add_custom_command(
@@ -70,3 +80,10 @@ endif()
 include_directories(${TARANTOOL_INCLUDE_DIRS})
 
 add_subdirectory(kafka)
+
+execute_process(
+    COMMAND ${GIT} checkout .
+    OUTPUT_VARIABLE PATCH_LOG
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/librdkafka
+)
